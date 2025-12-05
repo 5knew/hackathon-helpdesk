@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Ticket, TicketFilter } from '../types';
-import { getUserTickets } from '../utils/api';
+import { getTickets, searchTickets } from '../utils/ticket';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
 import { format } from 'date-fns';
@@ -69,13 +69,26 @@ export const MyTickets: React.FC = () => {
   const loadTickets = async () => {
     setLoading(true);
     try {
-      const data = await getUserTickets({
-        ...filter,
-        search: searchQuery || undefined
-      });
-      setTickets(data);
+      const user = storage.getUser();
+      if (searchQuery.trim()) {
+        // Используем поиск
+        const searchResult = await searchTickets(searchQuery) as { tickets: Ticket[]; total: number; query: string };
+        setTickets(searchResult.tickets);
+      } else {
+        // Используем обычный список с фильтрами
+        const response = await getTickets(
+          user?.email,
+          filter.status?.[0],
+          filter.category?.[0],
+          undefined,
+          50,
+          0
+        );
+        setTickets(response.tickets);
+      }
     } catch (error) {
-      showToast(t('error.load_tickets'), 'error');
+      showToast(t('error.load_tickets') || 'Ошибка при загрузке заявок', 'error');
+      console.error(error);
     } finally {
       setLoading(false);
     }
@@ -320,18 +333,22 @@ export const MyTickets: React.FC = () => {
                       <span className={`chip ${getPriorityColor(ticket.priority)}`}>
                         {ticket.priority}
                       </span>
-                      {ticket.auto_closed && (
-                        <span className="chip success">{t('tickets.auto_closed')}</span>
+                      {ticket.queue === 'Automated' && (
+                        <span className="chip success">{t('tickets.auto_closed') || 'Автоматически закрыто'}</span>
                       )}
                     </div>
                   </div>
                   <div style={{ textAlign: 'right', minWidth: '120px' }}>
-                    <p className="muted" style={{ fontSize: '0.85em', margin: '0 0 4px 0' }}>
-                      {format(new Date(ticket.created_at), 'dd MMM yyyy', { locale: ru })}
-                    </p>
-                    <p className="muted" style={{ fontSize: '0.85em' }}>
-                      {format(new Date(ticket.created_at), 'HH:mm')}
-                    </p>
+                    {ticket.created_at && (
+                      <>
+                        <p className="muted" style={{ fontSize: '0.85em', margin: '0 0 4px 0' }}>
+                          {format(new Date(ticket.created_at), 'dd MMM yyyy', { locale: ru })}
+                        </p>
+                        <p className="muted" style={{ fontSize: '0.85em' }}>
+                          {format(new Date(ticket.created_at), 'HH:mm')}
+                        </p>
+                      </>
+                    )}
                     {ticket.sla_deadline && (() => {
             const deadline = new Date(ticket.sla_deadline);
             const now = new Date();

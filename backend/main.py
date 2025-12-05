@@ -842,6 +842,77 @@ def get_tickets(
     finally:
         conn.close()
 
+@app.get("/tickets/search", response_model=SearchResponse)
+def search_tickets(q: str, limit: int = 50, offset: int = 0):
+    """Search tickets by text"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        search_term = f"%{q}%"
+        query = """
+            SELECT * FROM tickets 
+            WHERE problem_description LIKE ? 
+               OR subject LIKE ?
+               OR category LIKE ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """
+        
+        rows = cursor.execute(
+            query, (search_term, search_term, search_term, limit, offset)
+        ).fetchall()
+        
+        # Get total count
+        count_query = """
+            SELECT COUNT(*) FROM tickets 
+            WHERE problem_description LIKE ? 
+               OR subject LIKE ?
+               OR category LIKE ?
+        """
+        total = cursor.execute(count_query, (search_term, search_term, search_term)).fetchone()[0]
+        
+        tickets = []
+        for row in rows:
+            ticket_dict = dict(row)
+            for key in ['created_at', 'updated_at', 'closed_at', 'sla_deadline']:
+                if ticket_dict.get(key):
+                    ticket_dict[key] = str(ticket_dict[key])
+            tickets.append(TicketDetail(**ticket_dict))
+        
+        return SearchResponse(tickets=tickets, total=total, query=q)
+    finally:
+        conn.close()
+
+@app.get("/tickets/overdue", response_model=List[TicketDetail])
+def get_overdue_tickets():
+    """Get tickets that exceeded SLA"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        rows = cursor.execute("""
+            SELECT * FROM tickets 
+            WHERE sla_status = 'overdue' 
+            ORDER BY created_at DESC
+        """).fetchall()
+        
+        tickets = []
+        for row in rows:
+            ticket_dict = dict(row)
+            for key in ['created_at', 'updated_at', 'closed_at', 'sla_deadline']:
+                if ticket_dict.get(key):
+                    ticket_dict[key] = str(ticket_dict[key])
+            tickets.append(TicketDetail(**ticket_dict))
+        
+        return tickets
+    finally:
+        conn.close()
+
 @app.get("/tickets/{ticket_id}", response_model=TicketDetail)
 def get_ticket(ticket_id: int):
     """Get detailed information about a ticket"""
@@ -1030,77 +1101,6 @@ def get_comments(ticket_id: int):
             )
             for row in rows
         ]
-    finally:
-        conn.close()
-
-@app.get("/tickets/search", response_model=SearchResponse)
-def search_tickets(q: str, limit: int = 50, offset: int = 0):
-    """Search tickets by text"""
-    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    try:
-        search_term = f"%{q}%"
-        query = """
-            SELECT * FROM tickets 
-            WHERE problem_description LIKE ? 
-               OR subject LIKE ?
-               OR category LIKE ?
-            ORDER BY created_at DESC
-            LIMIT ? OFFSET ?
-        """
-        
-        rows = cursor.execute(
-            query, (search_term, search_term, search_term, limit, offset)
-        ).fetchall()
-        
-        # Get total count
-        count_query = """
-            SELECT COUNT(*) FROM tickets 
-            WHERE problem_description LIKE ? 
-               OR subject LIKE ?
-               OR category LIKE ?
-        """
-        total = cursor.execute(count_query, (search_term, search_term, search_term)).fetchone()[0]
-        
-        tickets = []
-        for row in rows:
-            ticket_dict = dict(row)
-            for key in ['created_at', 'updated_at', 'closed_at', 'sla_deadline']:
-                if ticket_dict.get(key):
-                    ticket_dict[key] = str(ticket_dict[key])
-            tickets.append(TicketDetail(**ticket_dict))
-        
-        return SearchResponse(tickets=tickets, total=total, query=q)
-    finally:
-        conn.close()
-
-@app.get("/tickets/overdue", response_model=List[TicketDetail])
-def get_overdue_tickets():
-    """Get tickets that exceeded SLA"""
-    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    try:
-        rows = cursor.execute("""
-            SELECT * FROM tickets 
-            WHERE sla_status = 'overdue' OR (sla_deadline < datetime('now') AND status != 'Closed')
-            ORDER BY sla_deadline ASC
-        """).fetchall()
-        
-        tickets = []
-        for row in rows:
-            ticket_dict = dict(row)
-            for key in ['created_at', 'updated_at', 'closed_at', 'sla_deadline']:
-                if ticket_dict.get(key):
-                    ticket_dict[key] = str(ticket_dict[key])
-            tickets.append(TicketDetail(**ticket_dict))
-        
-        return tickets
     finally:
         conn.close()
 

@@ -29,34 +29,60 @@ export interface TicketResult {
 
 export type ToastType = 'info' | 'success' | 'error';
 
+// Дополнительные типы для API
+export interface TicketListResponse {
+  tickets: Ticket[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface SearchResponse {
+  tickets: Ticket[];
+  total: number;
+  query: string;
+}
+
+export interface Feedback {
+  id: number;
+  ticket_id: number;
+  rating: number;
+  comment?: string;
+  created_at: string;
+}
+
 // Расширенные типы для новой функциональности
 export interface Ticket {
   id: number;
   user_id: string;
-  subject: string;
   problem_description: string;
-  status: 'Open' | 'In Progress' | 'Closed' | 'Waiting';
+  priority: string;
   category: string;
-  priority: 'Низкий' | 'Средний' | 'Высокий';
-  problem_type: 'Типовой' | 'Сложный';
+  status: string;  // 'Pending', 'In Progress', 'Closed'
   queue: string;
-  created_at: string;
-  updated_at: string;
-  closed_at?: string;
-  auto_closed?: boolean;
+  problem_type?: string;
+  confidence?: number;
+  needs_clarification: boolean;
+  confidence_warning?: string;
+  subject?: string;
   sla_deadline?: string;
-  csat_score?: number;
-  csat_comment?: string;
+  sla_status?: string;
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string;
 }
 
 export interface Comment {
   id: number;
   ticket_id: number;
-  author: string;
-  author_type: 'user' | 'operator' | 'system';
-  text: string;
+  user_id: string;  // Соответствует backend модели
+  comment_text: string;  // Соответствует backend модели
+  is_auto_reply: boolean;
   created_at: string;
-  is_auto_reply?: boolean;
+  // Для обратной совместимости
+  author?: string;
+  author_type?: 'user' | 'operator' | 'system';
+  text?: string;
 }
 
 export interface TicketHistory {
@@ -81,9 +107,12 @@ export interface TicketFilter {
 export interface Template {
   id: number;
   name: string;
-  category: string;
-  text: string;
-  language: 'ru' | 'kz';
+  category?: string;
+  content: string;  // Соответствует backend модели
+  created_at: string;
+  // Для обратной совместимости
+  text?: string;
+  language?: 'ru' | 'kz';
 }
 
 export interface Integration {

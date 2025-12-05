@@ -3,40 +3,113 @@ import { Metrics, Ticket } from '../types';
 import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 
+// Функция для рендеринга текста с кириллицей в изображение и добавления в PDF
+function addTextWithCyrillic(doc: jsPDF, text: string, x: number, y: number, fontSize: number = 12): number {
+  // Создаем временный canvas для рендеринга текста
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    // Fallback: используем стандартный метод (может не отображать кириллицу)
+    doc.setFontSize(fontSize);
+    const lines = doc.splitTextToSize(text, 170);
+    doc.text(lines, x, y);
+    return lines.length * fontSize * 0.35;
+  }
+  
+  // Устанавливаем шрифт с поддержкой кириллицы
+  ctx.font = `${fontSize * 2.83}px Arial, "DejaVu Sans", sans-serif`; // 2.83 - коэффициент для конвертации мм в пиксели
+  ctx.fillStyle = '#000000';
+  ctx.textBaseline = 'top';
+  
+  // Разбиваем текст на строки
+  const maxWidth = 170 * 2.83; // Максимальная ширина в пикселях
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+  
+  words.forEach(word => {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    const metrics = ctx.measureText(testLine);
+    
+    if (metrics.width > maxWidth && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = testLine;
+    }
+  });
+  if (currentLine) {
+    lines.push(currentLine);
+  }
+  
+  // Рендерим каждую строку в изображение и добавляем в PDF
+  let currentY = y;
+  const lineHeight = fontSize * 0.35;
+  
+  lines.forEach((line) => {
+    // Устанавливаем размер canvas для строки
+    const textMetrics = ctx.measureText(line);
+    canvas.width = Math.ceil(textMetrics.width) + 10;
+    canvas.height = Math.ceil(fontSize * 2.83) + 10;
+    
+    // Очищаем canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.font = `${fontSize * 2.83}px Arial, "DejaVu Sans", sans-serif`;
+    ctx.fillStyle = '#000000';
+    ctx.textBaseline = 'top';
+    
+    // Рисуем текст
+    ctx.fillText(line, 5, 5);
+    
+    // Конвертируем canvas в изображение и добавляем в PDF
+    const imgData = canvas.toDataURL('image/png');
+    doc.addImage(imgData, 'PNG', x, currentY, canvas.width / 2.83, canvas.height / 2.83);
+    
+    currentY += lineHeight;
+  });
+  
+  return lines.length * lineHeight;
+}
+
 export function exportMetricsToPDF(metrics: Metrics, tickets: Ticket[] = []) {
-  const doc = new jsPDF();
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4',
+    compress: true
+  });
+  
+  let yPos = 20;
   
   // Заголовок
-  doc.setFontSize(20);
-  doc.text('Отчет по метрикам Helpdesk', 20, 20);
+  yPos += addTextWithCyrillic(doc, 'Отчет по метрикам Helpdesk', 20, yPos, 20);
+  yPos += 5;
   
-  doc.setFontSize(12);
-  doc.text(`Дата создания: ${format(new Date(), 'dd MMMM yyyy, HH:mm', { locale: ru })}`, 20, 30);
-  
-  let yPos = 40;
-  
-  // Метрики
-  doc.setFontSize(16);
-  doc.text('Основные метрики', 20, yPos);
+  // Дата создания
+  const dateStr = format(new Date(), 'dd MMMM yyyy, HH:mm', { locale: ru });
+  yPos += addTextWithCyrillic(doc, `Дата создания: ${dateStr}`, 20, yPos, 12);
   yPos += 10;
   
-  doc.setFontSize(12);
-  doc.text(`Автоматические решения: ${metrics.auto}%`, 20, yPos);
+  // Метрики
+  yPos += addTextWithCyrillic(doc, 'Основные метрики', 20, yPos, 16);
+  yPos += 8;
+  
+  yPos += addTextWithCyrillic(doc, `Автоматические решения: ${metrics.auto || 0}%`, 20, yPos, 12);
   yPos += 7;
-  doc.text(`Точность классификации: ${metrics.accuracy}%`, 20, yPos);
+  yPos += addTextWithCyrillic(doc, `Точность классификации: ${metrics.accuracy || 0}%`, 20, yPos, 12);
   yPos += 7;
-  doc.text(`Время ответа (SLA): ${metrics.sla}%`, 20, yPos);
+  yPos += addTextWithCyrillic(doc, `Время ответа (SLA): ${metrics.sla || 0}%`, 20, yPos, 12);
   yPos += 7;
-  doc.text(`Очередь заявок: ${metrics.backlog}`, 20, yPos);
+  yPos += addTextWithCyrillic(doc, `Очередь заявок: ${metrics.backlog || 0}`, 20, yPos, 12);
   yPos += 7;
   
-  if (metrics.csat) {
-    doc.text(`Удовлетворенность клиентов (CSAT): ${metrics.csat.toFixed(1)}%`, 20, yPos);
+  if (metrics.csat !== undefined && metrics.csat !== null) {
+    yPos += addTextWithCyrillic(doc, `Удовлетворенность клиентов (CSAT): ${metrics.csat.toFixed(1)}%`, 20, yPos, 12);
     yPos += 7;
   }
   
-  if (metrics.routing_error_rate !== undefined) {
-    doc.text(`Ошибки маршрутизации: ${metrics.routing_error_rate.toFixed(1)}%`, 20, yPos);
+  if (metrics.routing_error_rate !== undefined && metrics.routing_error_rate !== null) {
+    yPos += addTextWithCyrillic(doc, `Ошибки маршрутизации: ${metrics.routing_error_rate.toFixed(1)}%`, 20, yPos, 12);
     yPos += 7;
   }
   
@@ -44,20 +117,35 @@ export function exportMetricsToPDF(metrics: Metrics, tickets: Ticket[] = []) {
   
   // Статистика по тикетам
   if (tickets.length > 0) {
-    doc.setFontSize(16);
-    doc.text('Статистика по заявкам', 20, yPos);
-    yPos += 10;
+    yPos += addTextWithCyrillic(doc, 'Статистика по заявкам', 20, yPos, 16);
+    yPos += 8;
     
     const statusCounts = tickets.reduce((acc, ticket) => {
-      acc[ticket.status] = (acc[ticket.status] || 0) + 1;
+      const status = ticket.status || 'Unknown';
+      acc[status] = (acc[status] || 0) + 1;
       return acc;
     }, {} as Record<string, number>);
     
-    doc.setFontSize(12);
+    // Переводим статусы на русский
+    const statusTranslations: Record<string, string> = {
+      'Open': 'Открыта',
+      'In Progress': 'В работе',
+      'Closed': 'Закрыта',
+      'Pending': 'Ожидание',
+      'Resolved': 'Решена'
+    };
+    
     Object.entries(statusCounts).forEach(([status, count]) => {
-      doc.text(`${status}: ${count}`, 20, yPos);
+      const statusRu = statusTranslations[status] || status;
+      yPos += addTextWithCyrillic(doc, `${statusRu}: ${count}`, 20, yPos, 12);
       yPos += 7;
     });
+  }
+  
+  // Если контент не помещается, добавляем новую страницу
+  if (yPos > 270) {
+    doc.addPage();
+    yPos = 20;
   }
   
   // Сохранение

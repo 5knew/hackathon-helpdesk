@@ -1,17 +1,9 @@
 import { Metrics } from '../types';
-
-// Backend API URL (Core API, не ML сервис)
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8002';
+import { apiRequest } from './apiConfig';
 
 export async function fetchMetrics(): Promise<Metrics> {
   try {
-    const response = await fetch(`${API_BASE_URL}/metrics`);
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
+    const data = await apiRequest<any>('/metrics');
     
     // Преобразуем данные из API в формат Metrics
     return {

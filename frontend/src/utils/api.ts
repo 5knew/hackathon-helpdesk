@@ -1,7 +1,6 @@
-import { Ticket, Comment, TicketHistory, TicketFilter, Template, Integration } from '../types';
+import { Ticket, Comment, TicketHistory, TicketFilter, Template, Integration, TicketListResponse } from '../types';
 import { storage } from './storage';
-
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8002';
+import { apiRequest } from './apiConfig';
 
 // Получить все тикеты пользователя
 export async function getUserTickets(filter?: TicketFilter): Promise<Ticket[]> {
@@ -10,16 +9,14 @@ export async function getUserTickets(filter?: TicketFilter): Promise<Ticket[]> {
   
   try {
     const params = new URLSearchParams();
-    if (filter?.status) params.append('status', filter.status.join(','));
-    if (filter?.category) params.append('category', filter.category.join(','));
-    if (filter?.priority) params.append('priority', filter.priority.join(','));
+    params.append('user_id', userEmail);
+    if (filter?.status && filter.status.length > 0) params.append('status', filter.status[0]);
+    if (filter?.category && filter.category.length > 0) params.append('category', filter.category[0]);
     if (filter?.dateFrom) params.append('date_from', filter.dateFrom);
     if (filter?.dateTo) params.append('date_to', filter.dateTo);
-    if (filter?.search) params.append('search', filter.search);
     
-    const response = await fetch(`${API_BASE_URL}/tickets?user_id=${userEmail}&${params.toString()}`);
-    if (!response.ok) throw new Error('Failed to fetch tickets');
-    return await response.json();
+    const response: TicketListResponse = await apiRequest(`/tickets?${params.toString()}`);
+    return response.tickets;
   } catch (error) {
     console.error('Error fetching tickets:', error);
     // Возвращаем моковые данные для демо
@@ -30,9 +27,7 @@ export async function getUserTickets(filter?: TicketFilter): Promise<Ticket[]> {
 // Получить тикет по ID
 export async function getTicketById(ticketId: number): Promise<Ticket | null> {
   try {
-    const response = await fetch(`${API_BASE_URL}/tickets/${ticketId}`);
-    if (!response.ok) throw new Error('Failed to fetch ticket');
-    return await response.json();
+    return await apiRequest<Ticket>(`/tickets/${ticketId}`);
   } catch (error) {
     console.error('Error fetching ticket:', error);
     return null;
@@ -42,9 +37,14 @@ export async function getTicketById(ticketId: number): Promise<Ticket | null> {
 // Получить комментарии тикета
 export async function getTicketComments(ticketId: number): Promise<Comment[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/tickets/${ticketId}/comments`);
-    if (!response.ok) throw new Error('Failed to fetch comments');
-    return await response.json();
+    const comments = await apiRequest<Comment[]>(`/tickets/${ticketId}/comments`);
+    // Преобразуем для обратной совместимости
+    return comments.map(c => ({
+      ...c,
+      author: c.user_id,
+      text: c.comment_text,
+      author_type: c.is_auto_reply ? 'system' : 'user' as const
+    }));
   } catch (error) {
     console.error('Error fetching comments:', error);
     // Возвращаем моковые данные для демо
@@ -58,29 +58,35 @@ function getMockComments(ticketId: number): Comment[] {
     {
       id: 1,
       ticket_id: ticketId,
+      user_id: 'AI Assistant',
+      comment_text: 'Ваша заявка получена и обрабатывается. Мы свяжемся с вами в ближайшее время.',
+      is_auto_reply: true,
+      created_at: new Date(now.getTime() - 3600000).toISOString(),
       author: 'AI Assistant',
       author_type: 'system',
-      text: 'Ваша заявка получена и обрабатывается. Мы свяжемся с вами в ближайшее время.',
-      created_at: new Date(now.getTime() - 3600000).toISOString(),
-      is_auto_reply: true
+      text: 'Ваша заявка получена и обрабатывается. Мы свяжемся с вами в ближайшее время.'
     },
     {
       id: 2,
       ticket_id: ticketId,
+      user_id: 'Оператор Иван',
+      comment_text: 'Добрый день! Я изучил вашу проблему. Для решения необходимо проверить настройки системы. Сделаю это в течение часа.',
+      is_auto_reply: false,
+      created_at: new Date(now.getTime() - 1800000).toISOString(),
       author: 'Оператор Иван',
       author_type: 'operator',
-      text: 'Добрый день! Я изучил вашу проблему. Для решения необходимо проверить настройки системы. Сделаю это в течение часа.',
-      created_at: new Date(now.getTime() - 1800000).toISOString(),
-      is_auto_reply: false
+      text: 'Добрый день! Я изучил вашу проблему. Для решения необходимо проверить настройки системы. Сделаю это в течение часа.'
     },
     {
       id: 3,
       ticket_id: ticketId,
+      user_id: storage.getUser()?.email || 'user@example.com',
+      comment_text: 'Спасибо за быстрый ответ! Буду ждать.',
+      is_auto_reply: false,
+      created_at: new Date(now.getTime() - 900000).toISOString(),
       author: storage.getUser()?.email || 'user@example.com',
       author_type: 'user',
-      text: 'Спасибо за быстрый ответ! Буду ждать.',
-      created_at: new Date(now.getTime() - 900000).toISOString(),
-      is_auto_reply: false
+      text: 'Спасибо за быстрый ответ! Буду ждать.'
     }
   ];
 }
@@ -89,41 +95,45 @@ function getMockComments(ticketId: number): Comment[] {
 export async function addComment(ticketId: number, text: string): Promise<Comment> {
   const user = storage.getUser();
   try {
-    const response = await fetch(`${API_BASE_URL}/tickets/${ticketId}/comments`, {
+    const comment = await apiRequest<Comment>(`/tickets/${ticketId}/comments`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        text,
-        author: user?.email || 'guest',
-        author_type: 'user'
+        comment_text: text,
+        is_auto_reply: false
       })
     });
-    if (!response.ok) throw new Error('Failed to add comment');
-    return await response.json();
+    // Преобразуем для обратной совместимости
+    return {
+      ...comment,
+      author: comment.user_id,
+      text: comment.comment_text,
+      author_type: 'user' as const
+    };
   } catch (error) {
     console.error('Error adding comment:', error);
     // Возвращаем моковый комментарий для демо
     return {
       id: Date.now(),
       ticket_id: ticketId,
+      user_id: user?.email || 'guest',
+      comment_text: text,
+      is_auto_reply: false,
+      created_at: new Date().toISOString(),
       author: user?.email || 'guest',
       author_type: 'user',
-      text,
-      created_at: new Date().toISOString(),
-      is_auto_reply: false
+      text: text
     };
   }
 }
 
-// Получить историю изменений тикета
+// Получить историю изменений тикета (пока не реализовано в backend, возвращаем мок)
 export async function getTicketHistory(ticketId: number): Promise<TicketHistory[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/tickets/${ticketId}/history`);
-    if (!response.ok) throw new Error('Failed to fetch history');
-    return await response.json();
+    // Эндпоинт /tickets/{id}/history пока не реализован в backend
+    // Возвращаем моковые данные
+    return getMockHistory(ticketId);
   } catch (error) {
     console.error('Error fetching history:', error);
-    // Возвращаем моковые данные для демо
     return getMockHistory(ticketId);
   }
 }
@@ -164,13 +174,10 @@ function getMockHistory(ticketId: number): TicketHistory[] {
 // Обновить статус тикета
 export async function updateTicketStatus(ticketId: number, status: string): Promise<Ticket> {
   try {
-    const response = await fetch(`${API_BASE_URL}/tickets/${ticketId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+    return await apiRequest<Ticket>(`/tickets/${ticketId}`, {
+      method: 'PUT',
       body: JSON.stringify({ status })
     });
-    if (!response.ok) throw new Error('Failed to update ticket');
-    return await response.json();
   } catch (error) {
     console.error('Error updating ticket:', error);
     throw error;
@@ -180,10 +187,9 @@ export async function updateTicketStatus(ticketId: number, status: string): Prom
 // Отправить CSAT оценку
 export async function submitCSAT(ticketId: number, score: number, comment?: string): Promise<void> {
   try {
-    await fetch(`${API_BASE_URL}/tickets/${ticketId}/csat`, {
+    await apiRequest(`/tickets/${ticketId}/feedback`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ score, comment })
+      body: JSON.stringify({ rating: score, comment })
     });
   } catch (error) {
     console.error('Error submitting CSAT:', error);
@@ -193,24 +199,25 @@ export async function submitCSAT(ticketId: number, score: number, comment?: stri
 // Получить шаблоны ответов
 export async function getTemplates(category?: string): Promise<Template[]> {
   try {
-    const url = category 
-      ? `${API_BASE_URL}/templates?category=${category}`
-      : `${API_BASE_URL}/templates`;
-    const response = await fetch(url);
-    if (!response.ok) throw new Error('Failed to fetch templates');
-    return await response.json();
+    const url = category ? `/templates?category=${category}` : '/templates';
+    const templates = await apiRequest<Template[]>(url);
+    // Преобразуем для обратной совместимости
+    return templates.map(t => ({
+      ...t,
+      text: t.content,
+      language: 'ru' as const
+    }));
   } catch (error) {
     console.error('Error fetching templates:', error);
     return getMockTemplates();
   }
 }
 
-// Получить интеграции
+// Получить интеграции (пока не реализовано в backend)
 export async function getIntegrations(): Promise<Integration[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/integrations`);
-    if (!response.ok) throw new Error('Failed to fetch integrations');
-    return await response.json();
+    // Эндпоинт пока не реализован в backend
+    return [];
   } catch (error) {
     console.error('Error fetching integrations:', error);
     return [];
@@ -223,29 +230,29 @@ function getMockTickets(): Ticket[] {
     {
       id: 1,
       user_id: 'user@example.com',
-      subject: 'Не могу войти в почту',
       problem_description: 'При попытке входа выдает ошибку неверного пароля',
       status: 'Closed',
       category: 'Техническая поддержка',
       priority: 'Высокий',
       problem_type: 'Типовой',
       queue: 'TechSupport',
+      needs_clarification: false,
+      subject: 'Не могу войти в почту',
       created_at: new Date(Date.now() - 86400000).toISOString(),
       updated_at: new Date(Date.now() - 86400000).toISOString(),
-      closed_at: new Date(Date.now() - 86400000).toISOString(),
-      auto_closed: true,
-      csat_score: 5
+      closed_at: new Date(Date.now() - 86400000).toISOString()
     },
     {
       id: 2,
       user_id: 'user@example.com',
-      subject: 'Нужна помощь с HR системой',
       problem_description: 'Хочу перенести отпуск',
-      status: 'In Progress',
+      status: 'Pending',
       category: 'HR',
       priority: 'Средний',
       problem_type: 'Сложный',
       queue: 'GeneralSupport',
+      needs_clarification: false,
+      subject: 'Нужна помощь с HR системой',
       created_at: new Date(Date.now() - 3600000).toISOString(),
       updated_at: new Date(Date.now() - 1800000).toISOString(),
       sla_deadline: new Date(Date.now() + 86400000).toISOString()
@@ -259,6 +266,8 @@ function getMockTemplates(): Template[] {
       id: 1,
       name: 'Стандартный ответ',
       category: 'Техническая поддержка',
+      content: 'Спасибо за обращение. Наша техническая команда уже работает над решением вашей проблемы.',
+      created_at: new Date().toISOString(),
       text: 'Спасибо за обращение. Наша техническая команда уже работает над решением вашей проблемы.',
       language: 'ru'
     },
@@ -266,6 +275,8 @@ function getMockTemplates(): Template[] {
       id: 2,
       name: 'Биллинг',
       category: 'Биллинг и платежи',
+      content: 'Ваш запрос по биллингу получен. Мы обработаем его в течение 1-2 рабочих дней.',
+      created_at: new Date().toISOString(),
       text: 'Ваш запрос по биллингу получен. Мы обработаем его в течение 1-2 рабочих дней.',
       language: 'ru'
     }

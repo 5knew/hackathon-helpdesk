@@ -1,0 +1,240 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Ticket, TicketListResponse } from '../types';
+import { storage } from '../utils/storage';
+import { getTickets, searchTickets } from '../utils/ticket';
+import { showToast } from '../utils/toast';
+import { Chip } from '../components/Chip';
+
+export const MyTickets: React.FC = () => {
+  const [tickets, setTickets] = useState<Ticket[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('');
+  const [categoryFilter, setCategoryFilter] = useState<string>('');
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!storage.isLogged()) {
+      navigate('/');
+      return;
+    }
+    loadTickets();
+  }, [navigate, offset, statusFilter, categoryFilter]);
+
+  const loadTickets = async () => {
+    setLoading(true);
+    try {
+      const user = storage.getUser();
+      const response: TicketListResponse = await getTickets(
+        user?.email,
+        statusFilter || undefined,
+        categoryFilter || undefined,
+        undefined,
+        20,
+        offset
+      );
+      setTickets(response.tickets);
+      setTotal(response.total);
+    } catch (error) {
+      showToast('Ошибка при загрузке заявок', 'error');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) {
+      loadTickets();
+      return;
+    }
+    setLoading(true);
+    try {
+      const response = await searchTickets(searchQuery, 20, offset);
+      setTickets(response.tickets);
+      setTotal(response.total);
+    } catch (error) {
+      showToast('Ошибка при поиске', 'error');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'Closed': return '#10b981';
+      case 'Pending': return '#f59e0b';
+      case 'In Progress': return '#3b82f6';
+      default: return '#6b7280';
+    }
+  };
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'Высокий': return '#ef4444';
+      case 'Средний': return '#f59e0b';
+      case 'Низкий': return '#10b981';
+      default: return '#6b7280';
+    }
+  };
+
+  return (
+    <div className="page-shell">
+      <header className="topbar card glass">
+        <div className="brand">
+          <div className="logo-dot"></div>
+          <div>
+            <p className="brand-name">Мои заявки</p>
+            <span className="brand-sub">История обращений</span>
+          </div>
+        </div>
+        <button onClick={() => navigate('/dashboard')} className="btn ghost">
+          Назад к дашборду
+        </button>
+      </header>
+
+      <div className="content-area">
+        <div className="card glass" style={{ marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <input
+              type="text"
+              placeholder="Поиск по заявкам..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+              style={{
+                flex: 1,
+                minWidth: '200px',
+                padding: '0.75rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'rgba(255,255,255,0.05)',
+                color: '#fff'
+              }}
+            />
+            <button onClick={handleSearch} className="btn primary">
+              Поиск
+            </button>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              style={{
+                padding: '0.75rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'rgba(255,255,255,0.05)',
+                color: '#fff'
+              }}
+            >
+              <option value="">Все статусы</option>
+              <option value="Pending">В обработке</option>
+              <option value="In Progress">В работе</option>
+              <option value="Closed">Закрыто</option>
+            </select>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              style={{
+                padding: '0.75rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'rgba(255,255,255,0.05)',
+                color: '#fff'
+              }}
+            >
+              <option value="">Все категории</option>
+              <option value="IT поддержка">IT поддержка</option>
+              <option value="Биллинг и платежи">Биллинг</option>
+              <option value="HR">HR</option>
+              <option value="Техническая поддержка">Техподдержка</option>
+            </select>
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="card glass" style={{ textAlign: 'center', padding: '3rem' }}>
+            <p>Загрузка...</p>
+          </div>
+        ) : tickets.length === 0 ? (
+          <div className="card glass" style={{ textAlign: 'center', padding: '3rem' }}>
+            <p>Заявки не найдены</p>
+          </div>
+        ) : (
+          <>
+            <div className="card glass" style={{ marginBottom: '1rem' }}>
+              <p>Всего заявок: {total}</p>
+            </div>
+            {tickets.map((ticket) => (
+              <div
+                key={ticket.id}
+                className="card glass"
+                style={{
+                  marginBottom: '1rem',
+                  cursor: 'pointer',
+                  transition: 'transform 0.2s'
+                }}
+                onClick={() => navigate(`/ticket/${ticket.id}`)}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateY(0)';
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
+                  <div>
+                    <h3 style={{ margin: 0, marginBottom: '0.5rem' }}>
+                      #{ticket.id} - {ticket.subject || 'Без темы'}
+                    </h3>
+                    <p style={{ margin: 0, opacity: 0.8, fontSize: '0.9rem' }}>
+                      {ticket.problem_description.substring(0, 150)}
+                      {ticket.problem_description.length > 150 ? '...' : ''}
+                    </p>
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <Chip
+                      label={ticket.status}
+                      style={{ background: getStatusColor(ticket.status) }}
+                    />
+                    <Chip
+                      label={ticket.priority}
+                      style={{ background: getPriorityColor(ticket.priority) }}
+                    />
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '1rem', fontSize: '0.85rem', opacity: 0.7 }}>
+                  <span>Категория: {ticket.category}</span>
+                  <span>Очередь: {ticket.queue}</span>
+                  {ticket.created_at && (
+                    <span>Создано: {new Date(ticket.created_at).toLocaleDateString('ru-RU')}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', marginTop: '2rem' }}>
+              <button
+                onClick={() => setOffset(Math.max(0, offset - 20))}
+                disabled={offset === 0}
+                className="btn ghost"
+              >
+                Назад
+              </button>
+              <button
+                onClick={() => setOffset(offset + 20)}
+                disabled={offset + 20 >= total}
+                className="btn ghost"
+              >
+                Вперед
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+};
+

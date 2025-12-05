@@ -1,8 +1,6 @@
-import { TicketResult } from '../types';
+import { TicketResult, Ticket, TicketListResponse, Comment, Feedback, Template } from '../types';
 import { storage } from './storage';
-
-// Backend API URL (Core API, не ML сервис)
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8002';
+import { apiRequest } from './apiConfig';
 
 export async function submitTicketToAPI(text: string): Promise<TicketResult> {
   const user = storage.getUser();
@@ -14,11 +12,8 @@ export async function submitTicketToAPI(text: string): Promise<TicketResult> {
   const body = text;
 
   try {
-    const response = await fetch(`${API_BASE_URL}/submit_ticket`, {
+    const data = await apiRequest<any>('/submit_ticket', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
       body: JSON.stringify({
         user_id: userEmail,
         problem_description: body,
@@ -26,12 +21,6 @@ export async function submitTicketToAPI(text: string): Promise<TicketResult> {
         language: 'ru' // Можно добавить переключатель языка
       }),
     });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
     
     // Определяем статус на основе результата
     const isAutoClosed = data.status === 'Closed' || data.queue === 'Automated';
@@ -47,6 +36,75 @@ export async function submitTicketToAPI(text: string): Promise<TicketResult> {
     console.error('Error submitting ticket:', error);
     throw new Error('Ошибка при отправке заявки. Убедитесь, что backend сервер запущен.');
   }
+}
+
+export async function getTickets(
+  user_id?: string,
+  status?: string,
+  category?: string,
+  queue?: string,
+  limit: number = 50,
+  offset: number = 0
+): Promise<TicketListResponse> {
+  const params = new URLSearchParams();
+  if (user_id) params.append('user_id', user_id);
+  if (status) params.append('status', status);
+  if (category) params.append('category', category);
+  if (queue) params.append('queue', queue);
+  params.append('limit', limit.toString());
+  params.append('offset', offset.toString());
+
+  return apiRequest<TicketListResponse>(`/tickets?${params.toString()}`);
+}
+
+export async function getTicket(ticket_id: number): Promise<Ticket> {
+  return apiRequest<Ticket>(`/tickets/${ticket_id}`);
+}
+
+export async function updateTicket(
+  ticket_id: number,
+  status?: string,
+  priority?: string,
+  category?: string,
+  queue?: string,
+  comment?: string
+): Promise<Ticket> {
+  return apiRequest<Ticket>(`/tickets/${ticket_id}`, {
+    method: 'PUT',
+    body: JSON.stringify({ status, priority, category, queue, comment }),
+  });
+}
+
+export async function getComments(ticket_id: number): Promise<Comment[]> {
+  return apiRequest<Comment[]>(`/tickets/${ticket_id}/comments`);
+}
+
+export async function addComment(
+  ticket_id: number,
+  comment_text: string,
+  is_auto_reply: boolean = false
+): Promise<Comment> {
+  return apiRequest<Comment>(`/tickets/${ticket_id}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({ comment_text, is_auto_reply }),
+  });
+}
+
+export async function searchTickets(query: string, limit: number = 50, offset: number = 0) {
+  const params = new URLSearchParams({ q: query, limit: limit.toString(), offset: offset.toString() });
+  return apiRequest(`/tickets/search?${params.toString()}`);
+}
+
+export async function submitFeedback(ticket_id: number, rating: number, comment?: string): Promise<Feedback> {
+  return apiRequest<Feedback>(`/tickets/${ticket_id}/feedback`, {
+    method: 'POST',
+    body: JSON.stringify({ rating, comment }),
+  });
+}
+
+export async function getTemplates(category?: string): Promise<Template[]> {
+  const params = category ? `?category=${category}` : '';
+  return apiRequest<Template[]>(`/templates${params}`);
 }
 
 export const ticketExamples = [

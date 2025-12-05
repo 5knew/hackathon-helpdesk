@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Ticket, Comment, TicketHistory } from '../types';
-import { getTicketById, getTicketComments, addComment, getTicketHistory, submitCSAT, getTemplates } from '../utils/api';
+import { getTicket, getComments, addComment, submitFeedback, getTemplates } from '../utils/ticket';
+import { getTicketHistory } from '../utils/api';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
 import { format } from 'date-fns';
@@ -41,12 +42,19 @@ export const TicketDetail: React.FC = () => {
     setLoading(true);
     try {
       const [ticketData, commentsData, historyData] = await Promise.all([
-        getTicketById(Number(id)),
-        getTicketComments(Number(id)),
-        getTicketHistory(Number(id))
+        getTicket(Number(id)),
+        getComments(Number(id)),
+        getTicketHistory(Number(id)).catch(() => []) // История может быть не реализована
       ]);
       setTicket(ticketData);
-      setComments(commentsData);
+      // Преобразуем комментарии для отображения
+      const displayComments = commentsData.map(c => ({
+        ...c,
+        author: c.user_id || c.author || 'Unknown',
+        text: c.comment_text || c.text || '',
+        author_type: c.is_auto_reply ? 'system' as const : 'user' as const
+      }));
+      setComments(displayComments);
       setHistory(historyData);
       
       // Загружаем шаблоны после получения тикета
@@ -55,8 +63,8 @@ export const TicketDetail: React.FC = () => {
         setTemplates(templatesData);
       }
       
-      // Показываем CSAT модалку если тикет закрыт и нет оценки
-      if (ticketData && ticketData.status === 'Closed' && !ticketData.csat_score) {
+      // Показываем CSAT модалку если тикет закрыт
+      if (ticketData && ticketData.status === 'Closed') {
         setShowCSAT(true);
       }
     } catch (error) {
@@ -70,8 +78,15 @@ export const TicketDetail: React.FC = () => {
     if (!newComment.trim() || !id) return;
     setSubmittingComment(true);
     try {
-      const comment = await addComment(Number(id), newComment);
-      setComments([...comments, comment]);
+      const comment = await addComment(Number(id), newComment, false);
+      // Преобразуем для отображения
+      const displayComment: Comment = {
+        ...comment,
+        author: comment.user_id,
+        text: comment.comment_text,
+        author_type: 'user' as const
+      };
+      setComments([...comments, displayComment]);
       setNewComment('');
       showToast(t('error.comment_added'), 'success');
       
@@ -92,7 +107,7 @@ export const TicketDetail: React.FC = () => {
       return;
     }
     try {
-      await submitCSAT(Number(id), csatScore, csatComment);
+      await submitFeedback(Number(id), csatScore, csatComment);
       showToast(t('tickets.detail.csat.thanks'), 'success');
       setShowCSAT(false);
       loadTicketData();
@@ -151,7 +166,9 @@ export const TicketDetail: React.FC = () => {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px' }}>
             <div>
               <h1 style={{ margin: '0 0 8px 0' }}>{ticket.subject}</h1>
-              <p className="muted">{t('tickets.detail.created')}: {format(new Date(ticket.created_at), 'dd MMMM yyyy, HH:mm', { locale: ru })}</p>
+              {ticket.created_at && (
+                <p className="muted">{t('tickets.detail.created')}: {format(new Date(ticket.created_at), 'dd MMMM yyyy, HH:mm', { locale: ru })}</p>
+              )}
             </div>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               <span className={`chip ${ticket.status === 'Closed' ? 'success' : ticket.status === 'In Progress' ? 'info' : 'ghost'}`}>
@@ -163,7 +180,7 @@ export const TicketDetail: React.FC = () => {
               <span className={`chip ${ticket.priority === 'Высокий' ? 'error' : ticket.priority === 'Средний' ? 'warning' : 'ghost'}`}>
                 {ticket.priority}
               </span>
-              {ticket.auto_closed && <span className="chip success">{t('tickets.auto_closed')}</span>}
+              {ticket.queue === 'Automated' && <span className="chip success">{t('tickets.auto_closed') || 'Автоматически закрыто'}</span>}
             </div>
           </div>
 
@@ -215,12 +232,7 @@ export const TicketDetail: React.FC = () => {
             );
           })()}
 
-          {ticket.csat_score && (
-            <div style={{ padding: '12px', background: '#d4edda', borderRadius: '6px' }}>
-              <strong>{t('tickets.detail.satisfaction')}:</strong> {ticket.csat_score}/5 ⭐
-              {ticket.csat_comment && <p style={{ margin: '8px 0 0 0' }}>{ticket.csat_comment}</p>}
-            </div>
-          )}
+          {/* CSAT отображается через отдельный компонент feedback */}
         </div>
 
         {/* Переписка */}
@@ -235,7 +247,11 @@ export const TicketDetail: React.FC = () => {
                 {comments.map((comment, index) => {
                   // Вычисляем время ответа относительно предыдущего комментария или создания тикета
                   const commentTime = new Date(comment.created_at);
-                  const prevCommentTime = index > 0 ? new Date(comments[index - 1].created_at) : ticket ? new Date(ticket.created_at) : commentTime;
+                  const prevCommentTime = index > 0 && comments[index - 1].created_at 
+                    ? new Date(comments[index - 1].created_at) 
+                    : ticket && ticket.created_at 
+                      ? new Date(ticket.created_at) 
+                      : commentTime;
                   const responseTimeMinutes = Math.floor((commentTime.getTime() - prevCommentTime.getTime()) / 60000);
                   
                   return (
@@ -317,11 +333,11 @@ export const TicketDetail: React.FC = () => {
                     className="ghost"
                     style={{ textAlign: 'left', padding: '8px', fontSize: '0.85em' }}
                     onClick={() => {
-                      setNewComment(template.text);
+                      setNewComment(template.content || template.text || '');
                       setShowTemplates(false);
                     }}
                   >
-                    <strong>{template.name}</strong> - {template.text.substring(0, 50)}...
+                    <strong>{template.name}</strong> - {(template.content || template.text || '').substring(0, 50)}...
                   </button>
                 ))}
               </div>

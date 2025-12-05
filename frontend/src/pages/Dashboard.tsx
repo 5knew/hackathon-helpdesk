@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BrandBar } from '../components/BrandBar';
 import { Chip } from '../components/Chip';
 import { Metrics, TicketResult } from '../types';
 import { storage } from '../utils/storage';

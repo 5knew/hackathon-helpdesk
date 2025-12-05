@@ -6,6 +6,7 @@ import sqlite3
 import requests
 import os
 import re
+from datetime import datetime, timedelta
 
 app = FastAPI()
 
@@ -45,6 +46,9 @@ class MetricsResponse(BaseModel):
     avg_response_time: float
     routing_errors: Dict[str, int]  # Метрики ошибок маршрутизации
     routing_error_rate: float  # Процент ошибок маршрутизации
+    csat_score: float  # Customer Satisfaction Score (0-100)
+    avg_resolution_time_by_category: Dict[str, float]  # Среднее время обработки по категориям (в часах)
+    trends: Dict[str, Dict[str, int]]  # Тренды по дням (последние 7 дней)
 
 class SummarizeRequest(BaseModel):
     ticket_id: Optional[int] = None
@@ -468,6 +472,56 @@ def get_metrics():
             "needs_clarification": tickets_needing_clarification
         }
         
+        # Расширенные метрики: CSAT Score
+        # CSAT рассчитывается на основе: автоматических решений (высокий CSAT) и времени ответа
+        # Формула: базовый CSAT (70) + бонус за автоответы (до +20) + бонус за скорость (до +10)
+        csat_base = 70.0
+        auto_bonus = min(auto_rate / 5, 20.0)  # До 20 баллов за автоответы
+        speed_bonus = max(0, 10.0 - (avg_response_time * 10))  # До 10 баллов за скорость
+        csat_score = min(100.0, csat_base + auto_bonus + speed_bonus)
+        
+        # Время обработки по категориям (в часах)
+        resolution_times = cursor.execute("""
+            SELECT category, 
+                   AVG(CASE 
+                       WHEN status = 'Closed' AND created_at IS NOT NULL 
+                       THEN (julianday('now') - julianday(created_at)) * 24
+                       ELSE NULL 
+                   END) as avg_hours
+            FROM tickets 
+            WHERE category IS NOT NULL
+            GROUP BY category
+        """).fetchall()
+        
+        avg_resolution_time_by_category = {
+            row['category']: round(float(row['avg_hours'] or 0.0), 2) 
+            for row in resolution_times if row['avg_hours'] is not None
+        }
+        
+        # Тренды: группировка по дням за последние 7 дней
+        trends = {}
+        for i in range(7):
+            date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+            day_start = date + ' 00:00:00'
+            day_end = date + ' 23:59:59'
+            
+            tickets_today = cursor.execute("""
+                SELECT COUNT(*) as count 
+                FROM tickets 
+                WHERE created_at >= ? AND created_at <= ?
+            """, (day_start, day_end)).fetchone()[0] or 0
+            
+            closed_today = cursor.execute("""
+                SELECT COUNT(*) as count 
+                FROM tickets 
+                WHERE status = 'Closed' AND created_at >= ? AND created_at <= ?
+            """, (day_start, day_end)).fetchone()[0] or 0
+            
+            trends[date] = {
+                "total": tickets_today,
+                "closed": closed_today
+            }
+        
     except sqlite3.OperationalError:
          # Return zero values if DB is empty or not init
          return {
@@ -481,7 +535,10 @@ def get_metrics():
             "auto_resolution_rate": 0.0,
             "avg_response_time": 0.0,
             "routing_errors": {},
-            "routing_error_rate": 0.0
+            "routing_error_rate": 0.0,
+            "csat_score": 0.0,
+            "avg_resolution_time_by_category": {},
+            "trends": {}
          }
     finally:
         conn.close()
@@ -501,7 +558,10 @@ def get_metrics():
         "auto_resolution_rate": round(auto_rate, 2),
         "avg_response_time": 0.8,  # Имитация времени ответа (в секундах)
         "routing_errors": routing_errors,
-        "routing_error_rate": round(routing_error_rate, 2)
+        "routing_error_rate": round(routing_error_rate, 2),
+        "csat_score": round(csat_score, 2),
+        "avg_resolution_time_by_category": avg_resolution_time_by_category,
+        "trends": trends
     }
 
 @app.post("/summarize", response_model=SummarizeResponse)

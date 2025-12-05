@@ -1,0 +1,28 @@
+{
+  "mapping_category": {
+    "Incident": "Инцидент",
+    "Problem": "Проблема",
+    "Request": "Запрос",
+    "Change": "Изменение",
+    "Technical Support": "Техническая поддержка",
+    "IT Support": "IT поддержка",
+    "Product Support": "Поддержка продукта",
+    "Billing and Payments": "Биллинг и платежи",
+    "Customer Service": "Клиентский сервис",
+    "Sales and Pre-Sales": "Продажи",
+    "Returns and Exchanges": "Возвраты и обмены",
+    "Service Outages and Maintenance": "Сбои и обслуживание",
+    "Human Resources": "HR",
+    "General Inquiry": "Общие вопросы"
+  },
+  "mapping_priority": {
+    "high": "Высокий",
+    "medium": "Средний",
+    "low": "Низкий"
+  },
+  "typical_categories": [
+    "Биллинг и платежи",
+    "Клиентский сервис",
+    "Общие вопросы"
+  ]
+}

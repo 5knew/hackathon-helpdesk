@@ -1,0 +1,30 @@
+# Виртуальное окружение
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Модели (если большие)
+models/*.pkl
+models/sentence_transformer_model/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Временные файлы
+*.log
+*.tmp
+.DS_Store
+

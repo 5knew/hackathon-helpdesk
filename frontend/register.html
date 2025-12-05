@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Регистрация | AI AutoResponder</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-dots">
+<div class="page-shell">
+    <header class="brand-bar">
+        <div class="brand">
+            <div class="logo-dot"></div>
+            <div>
+                <p class="brand-name">AI AutoResponder</p>
+                <span class="brand-sub">Единый вход и мониторинг</span>
+            </div>
+        </div>
+        <a class="link muted" href="index.html">Уже есть аккаунт?</a>
+    </header>
+
+    <main class="auth-layout">
+        <section class="auth-hero card glass">
+            <div class="eyebrow">Регистрация</div>
+            <h1>Создайте доступ и подключайтесь к <span class="grad-text">панели мониторинга</span>.</h1>
+            <p class="muted">Сохраняем логин в браузере, чтобы быстро показать прототип без сервера.</p>
+            <div class="chips">
+                <span class="chip">Демо-данные</span>
+                <span class="chip success">Быстрая настройка</span>
+                <span class="chip warning">Без бэкенда</span>
+            </div>
+        </section>
+
+        <section class="auth-card card">
+            <div class="auth-header">
+                <div>
+                    <p class="eyebrow">Создать аккаунт</p>
+                    <h2>3 шага и вы в системе</h2>
+                    <p class="muted">Email и пароль сохраняются локально.</p>
+                </div>
+                <div class="badge subtle">Demo only</div>
+            </div>
+
+            <div class="field">
+                <label for="regEmail">Email</label>
+                <input id="regEmail" type="email" placeholder="you@example.com" autocomplete="email">
+            </div>
+
+            <div class="field">
+                <label for="regPassword">Пароль</label>
+                <input id="regPassword" type="password" placeholder="••••••••" autocomplete="new-password">
+            </div>
+
+            <button class="primary" onclick="register()">Создать аккаунт</button>
+
+            <div class="auth-footer">
+                <span class="muted">Уже есть доступ?</span>
+                <a class="link" href="index.html">Войти</a>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

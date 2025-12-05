@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Дашборд | AI AutoResponder</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-dots">
+<div class="page-shell">
+    <header class="topbar card glass">
+        <div class="brand">
+            <div class="logo-dot"></div>
+            <div>
+                <p class="brand-name">AI AutoResponder</p>
+                <span class="brand-sub">Панель мониторинга</span>
+            </div>
+        </div>
+        <div class="topbar-actions">
+            <div class="chip ghost" id="userEmailChip">demo@user</div>
+            <button class="ghost" onclick="logout()">Выйти</button>
+        </div>
+    </header>
+
+    <main class="dashboard-grid">
+        <section class="card hero-card">
+            <div>
+                <div class="eyebrow">Единый вход • Мониторинг</div>
+                <h1>Отправляйте заявки и мгновенно видьте результат работы AI.</h1>
+                <p class="muted">Имитация Core API: отправляем обращение, показываем статус ("закрыто автоматически" или "передано в отдел") и метрики качества.</p>
+                <div class="chips">
+                    <span class="chip success">Live demo</span>
+                    <span class="chip ghost">/submit_ticket</span>
+                    <span class="chip ghost">/metrics</span>
+                </div>
+            </div>
+            <div class="hero-metrics">
+                <div class="hero-metric">
+                    <p class="label">Авто-решений</p>
+                    <p class="stat" id="autoPercentHero">—</p>
+                </div>
+                <div class="hero-metric">
+                    <p class="label">Точность AI</p>
+                    <p class="stat" id="accuracyPercentHero">—</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="card ticket-card">
+            <div class="section-head">
+                <div>
+                    <p class="eyebrow">Новая заявка</p>
+                    <h3>Опишите проблему</h3>
+                    <p class="muted">Текст отправится на Core API (имитация). Возвратим статус обработки.</p>
+                </div>
+                <button class="ghost" onclick="clearTicket()">Очистить</button>
+            </div>
+            <div class="field">
+                <label for="ticketText">Текст заявки</label>
+                <textarea id="ticketText" placeholder="Например: Не получается войти в корпоративную почту" rows="5"></textarea>
+            </div>
+            <div class="actions">
+                <button class="secondary" onclick="prefillTicket()">Заполнить пример</button>
+                <button class="primary" id="submitBtn" onclick="submitTicket()">Отправить</button>
+            </div>
+            <div class="result-wrapper">
+                <p class="label">Результат обработки</p>
+                <div id="resultBox" class="result-box">Пока нет результата</div>
+            </div>
+        </section>
+
+        <section class="card metrics-card">
+            <div class="section-head">
+                <div>
+                    <p class="eyebrow">Мониторинг</p>
+                    <h3>Метрики качества</h3>
+                    <p class="muted">Данные из /metrics (имитация). Нажмите «Обновить», чтобы пересчитать.</p>
+                </div>
+                <button class="ghost" onclick="loadMetrics()">Обновить</button>
+            </div>
+
+            <div class="metric-grid">
+                <div class="metric-tile">
+                    <div class="metric-top">
+                        <p>Автоматические решения</p>
+                        <span class="pill success">AI</span>
+                    </div>
+                    <p class="metric-value" id="autoPercent">—</p>
+                    <div class="progress">
+                        <div id="autoBar" class="progress-bar"></div>
+                    </div>
+                </div>
+
+                <div class="metric-tile">
+                    <div class="metric-top">
+                        <p>Точность классификации</p>
+                        <span class="pill info">ML</span>
+                    </div>
+                    <p class="metric-value" id="accuracyPercent">—</p>
+                    <div class="progress">
+                        <div id="accuracyBar" class="progress-bar"></div>
+                    </div>
+                </div>
+
+                <div class="metric-tile">
+                    <div class="metric-top">
+                        <p>Время ответа</p>
+                        <span class="pill warning">SLA</span>
+                    </div>
+                    <p class="metric-value" id="slaPercent">—</p>
+                    <div class="progress">
+                        <div id="slaBar" class="progress-bar"></div>
+                    </div>
+                </div>
+
+                <div class="metric-tile">
+                    <div class="metric-top">
+                        <p>Очередь заявок</p>
+                        <span class="pill neutral">OPS</span>
+                    </div>
+                    <p class="metric-value" id="backlogValue">—</p>
+                    <div class="progress">
+                        <div id="backlogBar" class="progress-bar"></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

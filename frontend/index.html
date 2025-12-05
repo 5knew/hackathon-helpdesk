@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Вход | AI AutoResponder</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-dots">
+<div class="page-shell">
+    <header class="brand-bar">
+        <div class="brand">
+            <div class="logo-dot"></div>
+            <div>
+                <p class="brand-name">AI AutoResponder</p>
+                <span class="brand-sub">Единый вход и мониторинг</span>
+            </div>
+        </div>
+        <div class="badge ghost">Prototype v1.0</div>
+    </header>
+
+    <main class="auth-layout">
+        <section class="auth-hero card glass">
+            <div class="eyebrow">Экспресс-поддержка</div>
+            <h1>Единый вход для заявок, <span class="grad-text">автоматических решений</span> и мониторинга.</h1>
+            <p class="muted">Отправляйте обращения, отслеживайте результат и смотрите показатели качества AI в одном месте.</p>
+
+            <div class="chips">
+                <span class="chip">0.8s среднее время ответа</span>
+                <span class="chip success">72% авто-решений</span>
+                <span class="chip warning">SLA 99.1%</span>
+            </div>
+
+            <div class="mini-grid">
+                <div class="mini-card">
+                    <p class="label">Метрики</p>
+                    <p class="stat">В реальном времени</p>
+                </div>
+                <div class="mini-card">
+                    <p class="label">Вход</p>
+                    <p class="stat">Единая точка</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="auth-card card">
+            <div class="auth-header">
+                <div>
+                    <p class="eyebrow">Войти</p>
+                    <h2>Добро пожаловать 👋</h2>
+                    <p class="muted">Используйте демо-учётку или зарегистрируйте новую.</p>
+                </div>
+                <div class="badge subtle">Demo only</div>
+            </div>
+
+            <div class="field">
+                <label for="loginEmail">Email</label>
+                <input id="loginEmail" type="email" placeholder="you@example.com" autocomplete="email">
+            </div>
+
+            <div class="field">
+                <label for="loginPassword">Пароль</label>
+                <input id="loginPassword" type="password" placeholder="••••••••" autocomplete="current-password">
+            </div>
+
+            <button class="primary" onclick="login()">Войти</button>
+
+            <div class="auth-footer">
+                <span class="muted">Нет аккаунта?</span>
+                <a class="link" href="register.html">Создать</a>
+            </div>
+        </section>
+    </main>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

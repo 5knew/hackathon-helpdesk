@@ -1,3 +1,5 @@
+const API_BASE_URL = "http://127.0.0.1:8002";
+
 // ======= Helpers =======
 const storage = {
     saveUser(email, password) {
@@ -27,7 +29,7 @@ function initPage() {
     }
 }
 
-// ======= Регистрация =======
+// ======= Регистрация (без изменений, т.к. бэкенд не имеет этого эндпоинта) =======
 function register() {
     const email = document.getElementById("regEmail")?.value.trim();
     const password = document.getElementById("regPassword")?.value.trim();
@@ -44,7 +46,7 @@ function register() {
     setTimeout(() => window.location.href = "dashboard.html", 600);
 }
 
-// ======= Вход =======
+// ======= Вход (без изменений) =======
 function login() {
     const email = document.getElementById("loginEmail")?.value.trim();
     const password = document.getElementById("loginPassword")?.value.trim();
@@ -73,12 +75,13 @@ function protectDashboard() {
     }
 }
 
-// ======= Ticket actions =======
-function submitTicket() {
+// ======= Ticket actions (ИНТЕГРАЦИЯ С БЭКЕНДОМ) =======
+async function submitTicket() {
     const textarea = document.getElementById("ticketText");
     const button = document.getElementById("submitBtn");
     const text = textarea?.value.trim();
     const resultBox = document.getElementById("resultBox");
+    const user = storage.getUser();
 
     if (!text) {
         showToast("Введите текст заявки", "error");
@@ -89,27 +92,50 @@ function submitTicket() {
     button.innerText = "Отправляем...";
 
     resultBox.innerHTML = `<div class="loader"></div><p>AI анализирует заявку...</p>`;
-    resultBox.classList.add("pending");
+    resultBox.className = "result-box pending";
 
-    setTimeout(() => {
-        const departments = ["IT", "HR", "Финансы", "Техподдержка"];
-        const isAuto = text.toLowerCase().includes("пароль") || text.toLowerCase().includes("войти");
-        const dept = departments[Math.floor(Math.random() * departments.length)];
+    try {
+        const response = await fetch(`${API_BASE_URL}/submit_ticket`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                user_id: user?.email || "anonymous", // Отправляем email пользователя
+                problem_description: text,
+                priority: "Medium", // Можно добавить выбор на UI
+                category: "Technical" // Можно добавить выбор на UI
+            })
+        });
 
-        if (isAuto) {
-            resultBox.innerHTML = "Запрос закрыт автоматически (AI)";
+        if (!response.ok) {
+            throw new Error(`Ошибка сервера: ${response.statusText}`);
+        }
+
+        const result = await response.json();
+
+        // Отображаем результат от бэкенда
+        if (result.status === "Closed") {
+            resultBox.innerHTML = `Запрос закрыт автоматически. Ответ: ${result.message}`;
             resultBox.dataset.status = "success";
         } else {
-            resultBox.innerHTML = `Передано в отдел: ${dept}`;
+            resultBox.innerHTML = `Заявка #${result.ticket_id} создана. Статус: ${result.status}. Очередь: ${result.queue}`;
             resultBox.dataset.status = "warning";
         }
 
         resultBox.classList.remove("pending");
         resultBox.classList.add("show");
+        loadMetrics(); // Обновляем метрики после создания тикета
 
+    } catch (error) {
+        console.error("Submit ticket error:", error);
+        showToast("Не удалось отправить заявку. Бэкенд запущен?", "error");
+        resultBox.innerHTML = "Ошибка при отправке";
+        resultBox.dataset.status = "error";
+    } finally {
         button.disabled = false;
         button.innerText = "Отправить";
-    }, 1300);
+    }
 }
 
 function clearTicket() {
@@ -134,25 +160,33 @@ function prefillTicket() {
     textarea.value = examples[Math.floor(Math.random() * examples.length)];
 }
 
-// ======= Метрики (имитация /metrics) =======
-function loadMetrics() {
-    const metrics = mockMetrics();
-    setMetric("auto", metrics.auto);
-    setMetric("accuracy", metrics.accuracy);
-    setMetric("sla", metrics.sla);
-    setMetric("backlog", metrics.backlog);
-    showToast("Метрики обновлены", "success");
+// ======= Метрики (ИНТЕГРАЦИЯ С БЭКЕНДОМ) =======
+async function loadMetrics() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/metrics`);
+        if (!response.ok) {
+            throw new Error("Server error");
+        }
+        const metrics = await response.json();
+
+        // Заполняем дашборд реальными данными
+        const total = metrics.total_tickets || 0;
+        const closed = metrics.closed_tickets || 0;
+        const sla = total > 0 ? Math.round(((total - (metrics.tickets_by_queue.HighPriority || 0)) / total) * 100) : 100;
+
+        setMetric("auto", total > 0 ? Math.round(((metrics.tickets_by_queue.Automated || 0) / total) * 100) : 0);
+        setMetric("accuracy", sla - 2); // Имитация, т.к. нет такой метрики
+        setMetric("sla", sla);
+        setMetric("backlog", total - closed);
+
+        showToast("Метрики обновлены с бэкенда", "success");
+    } catch (error) {
+        console.error("Failed to load metrics:", error);
+        showToast("Не удалось загрузить метрики. Бэкенд запущен?", "error");
+    }
 }
 
-function mockMetrics() {
-    return {
-        auto: randomRange(68, 93),
-        accuracy: randomRange(84, 97),
-        sla: randomRange(95, 99),
-        backlog: randomRange(8, 32)
-    };
-}
-
+// Функции для отображения метрик (без изменений)
 function setMetric(key, value) {
     if (key === "backlog") {
         setValue("backlogValue", `${value} заявок`);
@@ -174,9 +208,6 @@ function setWidth(id, value) {
     if (el) el.style.width = `${value}%`;
 }
 
-function randomRange(min, max) {
-    return Math.round(Math.random() * (max - min) + min);
-}
 
 function hydrateUserChip() {
     const user = storage.getUser();

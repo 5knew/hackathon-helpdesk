@@ -1,0 +1,330 @@
+import React, { useState, useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { Ticket, Comment, Feedback } from '../types';
+import { storage } from '../utils/storage';
+import { getTicket, getComments, addComment, updateTicket, submitFeedback } from '../utils/ticket';
+import { showToast } from '../utils/toast';
+import { Chip } from '../components/Chip';
+
+export const TicketDetail: React.FC = () => {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const [ticket, setTicket] = useState<Ticket | null>(null);
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState(0);
+  const [feedbackComment, setFeedbackComment] = useState('');
+
+  useEffect(() => {
+    if (!storage.isLogged()) {
+      navigate('/');
+      return;
+    }
+    if (id) {
+      loadTicket();
+      loadComments();
+    }
+  }, [id, navigate]);
+
+  const loadTicket = async () => {
+    if (!id) return;
+    setLoading(true);
+    try {
+      const data = await getTicket(parseInt(id));
+      setTicket(data);
+      if (data.status === 'Closed' && !showFeedback) {
+        // Check if feedback already submitted
+        setShowFeedback(true);
+      }
+    } catch (error) {
+      showToast('Ошибка при загрузке тикета', 'error');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadComments = async () => {
+    if (!id) return;
+    try {
+      const data = await getComments(parseInt(id));
+      setComments(data);
+    } catch (error) {
+      console.error('Error loading comments:', error);
+    }
+  };
+
+  const handleAddComment = async () => {
+    if (!newComment.trim() || !id) return;
+    setSubmitting(true);
+    try {
+      await addComment(parseInt(id), newComment, false);
+      setNewComment('');
+      await loadComments();
+      showToast('Комментарий добавлен', 'success');
+    } catch (error) {
+      showToast('Ошибка при добавлении комментария', 'error');
+      console.error(error);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleUpdateStatus = async (newStatus: string) => {
+    if (!id) return;
+    setSubmitting(true);
+    try {
+      await updateTicket(parseInt(id), newStatus);
+      await loadTicket();
+      showToast('Статус обновлен', 'success');
+    } catch (error) {
+      showToast('Ошибка при обновлении статуса', 'error');
+      console.error(error);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleSubmitFeedback = async () => {
+    if (!id || feedbackRating === 0) return;
+    setSubmitting(true);
+    try {
+      await submitFeedback(parseInt(id), feedbackRating, feedbackComment);
+      showToast('Спасибо за обратную связь!', 'success');
+      setShowFeedback(false);
+    } catch (error) {
+      showToast('Ошибка при отправке отзыва', 'error');
+      console.error(error);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'Closed': return '#10b981';
+      case 'Pending': return '#f59e0b';
+      case 'In Progress': return '#3b82f6';
+      default: return '#6b7280';
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="page-shell">
+        <div className="card glass" style={{ textAlign: 'center', padding: '3rem' }}>
+          <p>Загрузка...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!ticket) {
+    return (
+      <div className="page-shell">
+        <div className="card glass" style={{ textAlign: 'center', padding: '3rem' }}>
+          <p>Тикет не найден</p>
+          <button onClick={() => navigate('/my-tickets')} className="btn primary" style={{ marginTop: '1rem' }}>
+            Вернуться к заявкам
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="page-shell">
+      <header className="topbar card glass">
+        <div className="brand">
+          <div className="logo-dot"></div>
+          <div>
+            <p className="brand-name">Тикет #{ticket.id}</p>
+            <span className="brand-sub">{ticket.subject || 'Без темы'}</span>
+          </div>
+        </div>
+        <button onClick={() => navigate('/my-tickets')} className="btn ghost">
+          Назад
+        </button>
+      </header>
+
+      <div className="content-area">
+        <div className="card glass" style={{ marginBottom: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '1rem' }}>
+            <div>
+              <h2 style={{ margin: 0, marginBottom: '0.5rem' }}>{ticket.subject || 'Без темы'}</h2>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1rem' }}>
+                <Chip label={ticket.status} style={{ background: getStatusColor(ticket.status) }} />
+                <Chip label={ticket.priority} />
+                <Chip label={ticket.category} />
+                <Chip label={ticket.queue} />
+              </div>
+            </div>
+            {ticket.status !== 'Closed' && (
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  onClick={() => handleUpdateStatus('In Progress')}
+                  className="btn primary"
+                  disabled={submitting}
+                >
+                  В работу
+                </button>
+                <button
+                  onClick={() => handleUpdateStatus('Closed')}
+                  className="btn"
+                  disabled={submitting}
+                >
+                  Закрыть
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginBottom: '1rem' }}>
+            <h3>Описание проблемы:</h3>
+            <p style={{ whiteSpace: 'pre-wrap', lineHeight: '1.6' }}>{ticket.problem_description}</p>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', fontSize: '0.9rem' }}>
+            {ticket.created_at && (
+              <div>
+                <strong>Создано:</strong> {new Date(ticket.created_at).toLocaleString('ru-RU')}
+              </div>
+            )}
+            {ticket.updated_at && (
+              <div>
+                <strong>Обновлено:</strong> {new Date(ticket.updated_at).toLocaleString('ru-RU')}
+              </div>
+            )}
+            {ticket.sla_deadline && (
+              <div>
+                <strong>SLA дедлайн:</strong> {new Date(ticket.sla_deadline).toLocaleString('ru-RU')}
+              </div>
+            )}
+            {ticket.sla_status && (
+              <div>
+                <strong>SLA статус:</strong> {ticket.sla_status}
+              </div>
+            )}
+          </div>
+
+          {ticket.needs_clarification && (
+            <div style={{
+              marginTop: '1rem',
+              padding: '1rem',
+              background: 'rgba(239, 68, 68, 0.1)',
+              borderRadius: '8px',
+              border: '1px solid rgba(239, 68, 68, 0.3)'
+            }}>
+              <strong>⚠️ Требуется уточнение:</strong> {ticket.confidence_warning}
+            </div>
+          )}
+        </div>
+
+        <div className="card glass" style={{ marginBottom: '1.5rem' }}>
+          <h3 style={{ marginTop: 0 }}>Комментарии ({comments.length})</h3>
+          <div style={{ marginBottom: '1rem' }}>
+            {comments.map((comment) => (
+              <div
+                key={comment.id}
+                style={{
+                  padding: '1rem',
+                  marginBottom: '0.5rem',
+                  background: comment.is_auto_reply ? 'rgba(59, 130, 246, 0.1)' : 'rgba(255,255,255,0.05)',
+                  borderRadius: '8px',
+                  borderLeft: `3px solid ${comment.is_auto_reply ? '#3b82f6' : '#10b981'}`
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                  <strong>{comment.is_auto_reply ? '🤖 Автоматический ответ' : `👤 ${comment.user_id}`}</strong>
+                  <span style={{ fontSize: '0.85rem', opacity: 0.7 }}>
+                    {new Date(comment.created_at).toLocaleString('ru-RU')}
+                  </span>
+                </div>
+                <p style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{comment.comment_text}</p>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: 'flex', gap: '0.5rem' }}>
+            <textarea
+              value={newComment}
+              onChange={(e) => setNewComment(e.target.value)}
+              placeholder="Добавить комментарий..."
+              style={{
+                flex: 1,
+                padding: '0.75rem',
+                borderRadius: '8px',
+                border: '1px solid rgba(255,255,255,0.1)',
+                background: 'rgba(255,255,255,0.05)',
+                color: '#fff',
+                minHeight: '80px',
+                resize: 'vertical'
+              }}
+            />
+            <button
+              onClick={handleAddComment}
+              className="btn primary"
+              disabled={submitting || !newComment.trim()}
+            >
+              Отправить
+            </button>
+          </div>
+        </div>
+
+        {showFeedback && ticket.status === 'Closed' && (
+          <div className="card glass">
+            <h3 style={{ marginTop: 0 }}>Оцените работу поддержки</h3>
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                {[1, 2, 3, 4, 5].map((rating) => (
+                  <button
+                    key={rating}
+                    onClick={() => setFeedbackRating(rating)}
+                    style={{
+                      width: '50px',
+                      height: '50px',
+                      borderRadius: '50%',
+                      border: '2px solid',
+                      background: feedbackRating >= rating ? '#f59e0b' : 'transparent',
+                      color: '#fff',
+                      fontSize: '1.5rem',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    ⭐
+                  </button>
+                ))}
+              </div>
+              <textarea
+                value={feedbackComment}
+                onChange={(e) => setFeedbackComment(e.target.value)}
+                placeholder="Ваш комментарий (необязательно)..."
+                style={{
+                  width: '100%',
+                  padding: '0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(255,255,255,0.1)',
+                  background: 'rgba(255,255,255,0.05)',
+                  color: '#fff',
+                  minHeight: '80px',
+                  marginBottom: '1rem'
+                }}
+              />
+              <button
+                onClick={handleSubmitFeedback}
+                className="btn primary"
+                disabled={submitting || feedbackRating === 0}
+              >
+                Отправить отзыв
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+

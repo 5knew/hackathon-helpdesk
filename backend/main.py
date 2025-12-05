@@ -1,0 +1,42 @@
+"""
+Новый main.py с использованием новой архитектуры БД
+"""
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from routers import tickets, auth
+
+app = FastAPI(
+    title="Help Desk API",
+    description="AI-powered Help Desk system with PostgreSQL",
+    version="2.0.0"
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # В продакшене ограничить до конкретных доменов
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Подключаем роутеры
+app.include_router(auth.router)
+app.include_router(tickets.router)
+
+
+@app.get("/")
+def read_root():
+    return {
+        "message": "Help Desk Core API is running",
+        "version": "2.0.0",
+        "database": "PostgreSQL",
+        "docs": "/docs"
+    }
+
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy"}
+

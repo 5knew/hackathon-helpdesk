@@ -1,0 +1,40 @@
+import { Metrics } from '../types';
+import { apiRequest } from './apiConfig';
+
+export async function fetchMetrics(): Promise<Metrics> {
+  try {
+    const data = await apiRequest<any>('/metrics');
+    
+    // Преобразуем данные из API в формат Metrics
+    return {
+      auto: data.auto_resolution_rate || 0,
+      accuracy: data.accuracy_metrics?.avg_confidence || 0,
+      sla: Math.min(99, 100 - (data.avg_response_time || 0) * 10), // Преобразуем время ответа в SLA
+      backlog: data.total_tickets - data.closed_tickets || 0,
+      // Новые метрики из улучшений
+      csat: data.csat_score || 0,
+      routing_error_rate: data.routing_error_rate || 0,
+      routing_errors: data.routing_errors || {},
+      avg_resolution_time_by_category: data.avg_resolution_time_by_category || {},
+      trends: data.trends || {}
+    };
+  } catch (error) {
+    console.error('Error fetching metrics:', error);
+    // Fallback на моки при ошибке
+    return mockMetrics();
+  }
+}
+
+export function mockMetrics(): Metrics {
+  return {
+    auto: randomRange(68, 93),
+    accuracy: randomRange(84, 97),
+    sla: randomRange(95, 99),
+    backlog: randomRange(8, 32)
+  };
+}
+
+function randomRange(min: number, max: number): number {
+  return Math.round(Math.random() * (max - min) + min);
+}
+

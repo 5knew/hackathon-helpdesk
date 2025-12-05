@@ -19,7 +19,7 @@ print("=" * 60)
 
 # Загрузка обработанного датасета
 print("\n1. Загрузка датасета...")
-df = pd.read_csv("datasets/dataset_mapped.csv")
+df = pd.read_csv("datasets/dataset_preprocessed.csv")
 
 # Проверка наличия необходимых колонок
 required_cols = ['category', 'priority', 'problem_type']
@@ -37,9 +37,15 @@ print(f"   Всего записей: {len(df)}")
 
 # Загрузка модели для эмбеддингов
 print("\n3. Загрузка модели sentence-transformers...")
-model_name = "paraphrase-multilingual-MiniLM-L12-v2"
-print(f"   Модель: {model_name}")
-model = SentenceTransformer(model_name)
+model_path = "models/sentence_transformer_model"
+if os.path.exists(model_path):
+    print(f"   ✅ Используем сохраненную модель из {model_path}")
+    model = SentenceTransformer(model_path)
+else:
+    model_name = "paraphrase-multilingual-MiniLM-L12-v2"
+    print(f"   ⚠️  Локальной модели нет, загружаем из HuggingFace: {model_name}")
+    print("   (Это может занять время и требует интернет-соединения)")
+    model = SentenceTransformer(model_name)
 
 # Генерация эмбеддингов
 print("\n4. Генерация эмбеддингов (это может занять время)...")

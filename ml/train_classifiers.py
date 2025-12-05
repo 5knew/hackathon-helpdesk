@@ -19,7 +19,7 @@ print("=" * 60)
 
 # Загрузка обработанного датасета
 print("\n1. Загрузка датасета...")
-df = pd.read_csv("datasets/dataset_mapped.csv")
+df = pd.read_csv("datasets/dataset_preprocessed.csv")
 
 # Проверка наличия необходимых колонок
 required_cols = ['category', 'priority', 'problem_type']

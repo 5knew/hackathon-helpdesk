@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BrandBar } from '../components/BrandBar';
 import { Chip } from '../components/Chip';
 import { Metrics, TicketResult } from '../types';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
-import { mockMetrics } from '../utils/metrics';
+import { fetchMetrics } from '../utils/metrics';
 import { submitTicketToAPI, ticketExamples } from '../utils/ticket';
 
 export const Dashboard: React.FC = () => {
@@ -66,10 +65,15 @@ export const Dashboard: React.FC = () => {
     setTicketText(example);
   };
 
-  const loadMetrics = () => {
-    const newMetrics = mockMetrics();
-    setMetrics(newMetrics);
-    showToast('Метрики обновлены', 'success');
+  const loadMetrics = async () => {
+    try {
+      const newMetrics = await fetchMetrics();
+      setMetrics(newMetrics);
+      showToast('Метрики обновлены', 'success');
+    } catch (error) {
+      console.error('Error loading metrics:', error);
+      showToast('Ошибка загрузки метрик', 'error');
+    }
   };
 
   const setMetricValue = (key: keyof Metrics, value: number) => {
@@ -189,7 +193,19 @@ export const Dashboard: React.FC = () => {
                   <p>AI анализирует заявку...</p>
                 </>
               ) : ticketResult ? (
-                ticketResult.message
+                <>
+                  {ticketResult.message}
+                  {ticketResult.needs_clarification && (
+                    <div style={{ marginTop: '8px', padding: '8px', background: '#fff3cd', borderRadius: '4px', fontSize: '0.9em' }}>
+                      ⚠️ Требуется уточнение: {ticketResult.confidence_warning}
+                    </div>
+                  )}
+                  {ticketResult.queue && (
+                    <div style={{ marginTop: '4px', fontSize: '0.85em', color: '#666' }}>
+                      Очередь: {ticketResult.queue}
+                    </div>
+                  )}
+                </>
               ) : (
                 'Пока нет результата'
               )}
@@ -261,7 +277,58 @@ export const Dashboard: React.FC = () => {
                 <div id="backlogBar" className="progress-bar"></div>
               </div>
             </div>
+
+            {metrics?.csat && (
+              <div className="metric-tile">
+                <div className="metric-top">
+                  <p>Удовлетворенность клиентов</p>
+                  <span className="pill success">CSAT</span>
+                </div>
+                <p className="metric-value" id="csatPercent">
+                  {metrics.csat.toFixed(1)}%
+                </p>
+                <div className="progress">
+                  <div id="csatBar" className="progress-bar" style={{ width: `${metrics.csat}%` }}></div>
+                </div>
+              </div>
+            )}
+
+            {metrics?.routing_error_rate !== undefined && (
+              <div className="metric-tile">
+                <div className="metric-top">
+                  <p>Ошибки маршрутизации</p>
+                  <span className="pill warning">ERR</span>
+                </div>
+                <p className="metric-value" id="routingErrorPercent">
+                  {metrics.routing_error_rate.toFixed(1)}%
+                </p>
+                <div className="progress">
+                  <div id="routingErrorBar" className="progress-bar" style={{ width: `${metrics.routing_error_rate}%`, background: '#dc3545' }}></div>
+                </div>
+                {metrics.routing_errors && (
+                  <div style={{ marginTop: '8px', fontSize: '0.75em', color: '#666' }}>
+                    Ручная проверка: {metrics.routing_errors.manual_review || 0} | 
+                    Низкая уверенность: {metrics.routing_errors.low_confidence || 0}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
+
+          {metrics?.trends && Object.keys(metrics.trends).length > 0 && (
+            <div style={{ marginTop: '24px', padding: '16px', background: '#f8f9fa', borderRadius: '8px' }}>
+              <h4 style={{ marginBottom: '12px', fontSize: '0.9em' }}>Тренды за 7 дней</h4>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '8px', fontSize: '0.75em' }}>
+                {Object.entries(metrics.trends).reverse().map(([date, data]) => (
+                  <div key={date} style={{ textAlign: 'center', padding: '8px', background: 'white', borderRadius: '4px' }}>
+                    <div style={{ fontWeight: 'bold', marginBottom: '4px' }}>{new Date(date).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' })}</div>
+                    <div>Всего: {data.total}</div>
+                    <div style={{ color: '#28a745' }}>Закрыто: {data.closed}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </section>
       </main>
     </div>

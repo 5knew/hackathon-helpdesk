@@ -6,27 +6,70 @@ import { Badge } from '../components/Badge';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
 import { useLanguage } from '../contexts/LanguageContext';
+import { api } from '../utils/apiGenerated';
 
 export const Register: React.FC = () => {
   const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
 
-  const handleRegister = () => {
+  const handleRegister = async () => {
     const trimmedEmail = email.trim();
     const trimmedPassword = password.trim();
+    const trimmedName = name.trim();
 
-    if (!trimmedEmail || !trimmedPassword) {
+    if (!trimmedEmail || !trimmedPassword || !trimmedName) {
       showToast(t('register.enter_data'), 'error');
       return;
     }
 
-    storage.saveUser(trimmedEmail, trimmedPassword);
-    storage.setLogged(true);
+    setIsSubmitting(true);
 
-    showToast(t('register.success'), 'success');
-    setTimeout(() => navigate('/dashboard'), 600);
+    try {
+      // Используем новый сгенерированный API для регистрации
+      await api.auth.register({
+        email: trimmedEmail,
+        password: trimmedPassword,
+        name: trimmedName,
+        role: 'client' // По умолчанию
+      });
+
+      // После успешной регистрации автоматически выполняем вход для получения токена
+      try {
+        const tokenResponse = await api.auth.login({
+          email: trimmedEmail,
+          password: trimmedPassword
+        });
+
+        // Сохраняем данные пользователя с токеном
+        storage.saveUser(
+          trimmedEmail,
+          trimmedPassword,
+          tokenResponse.access_token,
+          tokenResponse.user_id,
+          tokenResponse.name,
+          tokenResponse.role
+        );
+        storage.setLogged(true);
+
+        showToast(t('register.success'), 'success');
+        setTimeout(() => navigate('/dashboard'), 600);
+      } catch (loginError) {
+        // Если вход не удался, но регистрация прошла успешно
+        console.error('Auto-login after registration error:', loginError);
+        showToast('Регистрация успешна, но не удалось выполнить вход. Пожалуйста, войдите вручную.', 'error');
+        setTimeout(() => navigate('/'), 1000);
+      }
+    } catch (error) {
+      console.error('Registration error:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Ошибка при регистрации';
+      showToast(errorMessage, 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -41,7 +84,7 @@ export const Register: React.FC = () => {
           <div className="chips">
             <Chip>{t('register.demo')}</Chip>
             <Chip variant="success">{t('register.quick_setup')}</Chip>
-            <Chip variant="warning">{t('register.no_backend')}</Chip>
+            <Chip variant="success">API Connected</Chip>
           </div>
         </section>
 
@@ -52,7 +95,20 @@ export const Register: React.FC = () => {
               <h2>{t('register.steps')}</h2>
               <p className="muted">{t('register.local_desc')}</p>
             </div>
-            <Badge variant="subtle">Demo only</Badge>
+            <Badge variant="subtle">API Ready</Badge>
+          </div>
+
+          <div className="field">
+            <label htmlFor="regName">{t('common.name') || 'Имя'}</label>
+            <input
+              id="regName"
+              type="text"
+              placeholder="Иван Иванов"
+              autoComplete="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleRegister()}
+            />
           </div>
 
           <div className="field">
@@ -81,8 +137,8 @@ export const Register: React.FC = () => {
             />
           </div>
 
-          <button className="primary" onClick={handleRegister}>
-            {t('common.create_account')}
+          <button className="primary" onClick={handleRegister} disabled={isSubmitting}>
+            {isSubmitting ? t('common.submitting') || 'Регистрация...' : t('common.create_account')}
           </button>
 
           <div className="auth-footer">

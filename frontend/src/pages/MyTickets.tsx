@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Ticket, TicketFilter } from '../types';
 import { getTickets, searchTickets } from '../utils/ticket';
+import { api } from '../utils/apiGenerated';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
 import { format } from 'date-fns';
@@ -69,26 +70,50 @@ export const MyTickets: React.FC = () => {
   const loadTickets = async () => {
     setLoading(true);
     try {
-      const user = storage.getUser();
       if (searchQuery.trim()) {
-        // Используем поиск
+        // Используем поиск (старый метод, пока не реализован в новом API)
         const searchResult = await searchTickets(searchQuery) as { tickets: Ticket[]; total: number; query: string };
-        setTickets(searchResult.tickets);
+        setTickets(searchResult?.tickets || []);
       } else {
-        // Используем обычный список с фильтрами
-        const response = await getTickets(
-          user?.email,
-          filter.status?.[0],
-          filter.category?.[0],
-          undefined,
-          50,
-          0
-        );
-        setTickets(response.tickets);
+        // Используем новый сгенерированный API
+        const statusMap: Record<string, 'new' | 'auto_resolved' | 'in_work' | 'waiting' | 'closed'> = {
+          'Open': 'new',
+          'In Progress': 'in_work',
+          'Pending': 'waiting',
+          'Closed': 'closed'
+        };
+        
+        const status = filter.status?.[0] ? statusMap[filter.status[0]] || undefined : undefined;
+        
+        const tickets = await api.tickets.list({ 
+          skip: 0,
+          limit: 50,
+          status 
+        });
+        
+        // Преобразуем новые типы в старые для обратной совместимости
+        const convertedTickets: Ticket[] = tickets.map(t => ({
+          id: parseInt(t.id) || 0,
+          user_id: t.user_id,
+          problem_description: t.body,
+          status: t.status,
+          category: t.category_id || '',
+          priority: t.priority || '',
+          queue: t.assigned_department_id || '',
+          problem_type: t.issue_type || '',
+          needs_clarification: t.ai_confidence !== null && t.ai_confidence < 0.7,
+          subject: t.subject || '',
+          created_at: t.created_at,
+          updated_at: t.updated_at,
+          closed_at: t.closed_at || undefined
+        }));
+        
+        setTickets(convertedTickets);
       }
     } catch (error) {
+      console.error('Error loading tickets:', error);
       showToast(t('error.load_tickets') || 'Ошибка при загрузке заявок', 'error');
-      console.error(error);
+      setTickets([]); // Устанавливаем пустой массив при ошибке
     } finally {
       setLoading(false);
     }
@@ -287,7 +312,7 @@ export const MyTickets: React.FC = () => {
             <div className="loader"></div>
             <p className="muted">Загрузка заявок...</p>
           </div>
-        ) : tickets.length === 0 ? (
+        ) : !tickets || tickets.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '48px' }}>
             <p className="muted">{t('tickets.not_found')}</p>
             <Link to="/dashboard" className="primary" style={{ marginTop: '16px', display: 'inline-block' }}>

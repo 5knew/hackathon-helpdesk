@@ -6,31 +6,53 @@ import { Badge } from '../components/Badge';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
 import { useLanguage } from '../contexts/LanguageContext';
+import { api } from '../utils/apiGenerated';
 
 export const Login: React.FC = () => {
   const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const navigate = useNavigate();
 
-  const handleLogin = () => {
+  const handleLogin = async () => {
     const trimmedEmail = email.trim();
     const trimmedPassword = password.trim();
-    const user = storage.getUser();
 
     if (!trimmedEmail || !trimmedPassword) {
       showToast(t('login.enter_email'), 'error');
       return;
     }
 
-    if (!user || user.email !== trimmedEmail || user.password !== trimmedPassword) {
-      showToast(t('login.wrong_credentials'), 'error');
-      return;
-    }
+    setIsSubmitting(true);
 
-    storage.setLogged(true);
-    showToast(t('login.success'), 'success');
-    setTimeout(() => navigate('/dashboard'), 500);
+    try {
+      // Используем новый сгенерированный API
+      const tokenResponse = await api.auth.login({
+        email: trimmedEmail,
+        password: trimmedPassword
+      });
+
+      // Сохраняем данные пользователя с токеном
+      storage.saveUser(
+        trimmedEmail,
+        trimmedPassword,
+        tokenResponse.access_token,
+        tokenResponse.user_id,
+        tokenResponse.name,
+        tokenResponse.role
+      );
+      storage.setLogged(true);
+
+      showToast(t('login.success'), 'success');
+      setTimeout(() => navigate('/dashboard'), 500);
+    } catch (error) {
+      console.error('Login error:', error);
+      const errorMessage = error instanceof Error ? error.message : t('login.wrong_credentials');
+      showToast(errorMessage, 'error');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -99,8 +121,8 @@ export const Login: React.FC = () => {
             />
           </div>
 
-          <button className="primary" onClick={handleLogin}>
-            {t('common.login')}
+          <button className="primary" onClick={handleLogin} disabled={isSubmitting}>
+            {isSubmitting ? t('common.submitting') || 'Вход...' : t('common.login')}
           </button>
 
           <div className="auth-footer">

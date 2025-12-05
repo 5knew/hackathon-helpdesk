@@ -1,22 +1,49 @@
-import { Ticket, Comment, TicketHistory, TicketFilter, Template, Integration, TicketListResponse } from '../types';
+import { Ticket, Comment, TicketHistory, TicketFilter, Template, Integration } from '../types';
 import { storage } from './storage';
 import { apiRequest } from './apiConfig';
+import { api } from './apiGenerated';
+
+/**
+ * ВНИМАНИЕ: Этот файл содержит старые API функции.
+ * Для эндпоинтов, которые есть в новом API (/tickets, /tickets/{id}), используйте api.tickets.* из apiGenerated.ts
+ * Эти функции оставлены для обратной совместимости и для эндпоинтов, которых нет в новом API (comments, history, templates, integrations)
+ */
 
 // Получить все тикеты пользователя
+// УСТАРЕЛО: Используйте api.tickets.list() из apiGenerated.ts
+// Оставлено для обратной совместимости
 export async function getUserTickets(filter?: TicketFilter): Promise<Ticket[]> {
-  const user = storage.getUser();
-  const userEmail = user?.email || 'guest@user.com';
-  
   try {
-    const params = new URLSearchParams();
-    params.append('user_id', userEmail);
-    if (filter?.status && filter.status.length > 0) params.append('status', filter.status[0]);
-    if (filter?.category && filter.category.length > 0) params.append('category', filter.category[0]);
-    if (filter?.dateFrom) params.append('date_from', filter.dateFrom);
-    if (filter?.dateTo) params.append('date_to', filter.dateTo);
+    // Используем новый сгенерированный API
+    const statusMap: Record<string, 'new' | 'auto_resolved' | 'in_work' | 'waiting' | 'closed'> = {
+      'Open': 'new',
+      'In Progress': 'in_work',
+      'Pending': 'waiting',
+      'Closed': 'closed'
+    };
     
-    const response: TicketListResponse = await apiRequest(`/tickets?${params.toString()}`);
-    return response.tickets;
+    const status = filter?.status && filter.status.length > 0 
+      ? statusMap[filter.status[0]] || undefined 
+      : undefined;
+    
+    const tickets = await api.tickets.list({ status });
+    
+    // Преобразуем новые типы в старые для обратной совместимости
+    return tickets.map(t => ({
+      id: parseInt(t.id) || 0,
+      user_id: t.user_id,
+      problem_description: t.body,
+      status: t.status,
+      category: t.category_id || '',
+      priority: t.priority || '',
+      queue: t.assigned_department_id || '',
+      problem_type: t.issue_type || '',
+      needs_clarification: t.ai_confidence !== null && t.ai_confidence < 0.7,
+      subject: t.subject || '',
+      created_at: t.created_at,
+      updated_at: t.updated_at,
+      closed_at: t.closed_at || undefined
+    }));
   } catch (error) {
     console.error('Error fetching tickets:', error);
     // Возвращаем моковые данные для демо
@@ -25,9 +52,29 @@ export async function getUserTickets(filter?: TicketFilter): Promise<Ticket[]> {
 }
 
 // Получить тикет по ID
+// УСТАРЕЛО: Используйте api.tickets.getById() из apiGenerated.ts
+// Оставлено для обратной совместимости
 export async function getTicketById(ticketId: number): Promise<Ticket | null> {
   try {
-    return await apiRequest<Ticket>(`/tickets/${ticketId}`);
+    // Используем новый сгенерированный API
+    const ticket = await api.tickets.getById(ticketId.toString());
+    
+    // Преобразуем новый тип в старый для обратной совместимости
+    return {
+      id: parseInt(ticket.id) || ticketId,
+      user_id: ticket.user_id,
+      problem_description: ticket.body,
+      status: ticket.status,
+      category: ticket.category_id || '',
+      priority: ticket.priority || '',
+      queue: ticket.assigned_department_id || '',
+      problem_type: ticket.issue_type || '',
+      needs_clarification: ticket.ai_confidence !== null && ticket.ai_confidence < 0.7,
+      subject: ticket.subject || '',
+      created_at: ticket.created_at,
+      updated_at: ticket.updated_at,
+      closed_at: ticket.closed_at || undefined
+    };
   } catch (error) {
     console.error('Error fetching ticket:', error);
     return null;
@@ -35,6 +82,8 @@ export async function getTicketById(ticketId: number): Promise<Ticket | null> {
 }
 
 // Получить комментарии тикета
+// ВНИМАНИЕ: Эндпоинт /tickets/{id}/comments пока не реализован в новом API
+// Используется старый API
 export async function getTicketComments(ticketId: number): Promise<Comment[]> {
   try {
     const comments = await apiRequest<Comment[]>(`/tickets/${ticketId}/comments`);
@@ -126,7 +175,9 @@ export async function addComment(ticketId: number, text: string): Promise<Commen
   }
 }
 
-// Получить историю изменений тикета (пока не реализовано в backend, возвращаем мок)
+// Получить историю изменений тикета
+// ВНИМАНИЕ: Эндпоинт /tickets/{id}/history пока не реализован в новом API
+// Возвращаем моковые данные
 export async function getTicketHistory(ticketId: number): Promise<TicketHistory[]> {
   try {
     // Эндпоинт /tickets/{id}/history пока не реализован в backend
@@ -172,12 +223,31 @@ function getMockHistory(ticketId: number): TicketHistory[] {
 }
 
 // Обновить статус тикета
+// УСТАРЕЛО: Используйте api.tickets.update() из apiGenerated.ts
+// Оставлено для обратной совместимости
 export async function updateTicketStatus(ticketId: number, status: string): Promise<Ticket> {
   try {
-    return await apiRequest<Ticket>(`/tickets/${ticketId}`, {
-      method: 'PUT',
-      body: JSON.stringify({ status })
+    // Используем новый сгенерированный API
+    const ticket = await api.tickets.update(ticketId.toString(), {
+      status: status as any
     });
+    
+    // Преобразуем новый тип в старый для обратной совместимости
+    return {
+      id: parseInt(ticket.id) || ticketId,
+      user_id: ticket.user_id,
+      problem_description: ticket.body,
+      status: ticket.status,
+      category: ticket.category_id || '',
+      priority: ticket.priority || '',
+      queue: ticket.assigned_department_id || '',
+      problem_type: ticket.issue_type || '',
+      needs_clarification: ticket.ai_confidence !== null && ticket.ai_confidence < 0.7,
+      subject: ticket.subject || '',
+      created_at: ticket.created_at,
+      updated_at: ticket.updated_at,
+      closed_at: ticket.closed_at || undefined
+    };
   } catch (error) {
     console.error('Error updating ticket:', error);
     throw error;
@@ -197,6 +267,8 @@ export async function submitCSAT(ticketId: number, score: number, comment?: stri
 }
 
 // Получить шаблоны ответов
+// ВНИМАНИЕ: Эндпоинт /templates пока не реализован в новом API
+// Используется старый API или моки
 export async function getTemplates(category?: string): Promise<Template[]> {
   try {
     const url = category ? `/templates?category=${category}` : '/templates';
@@ -213,7 +285,9 @@ export async function getTemplates(category?: string): Promise<Template[]> {
   }
 }
 
-// Получить интеграции (пока не реализовано в backend)
+// Получить интеграции
+// ВНИМАНИЕ: Эндпоинт /integrations пока не реализован в новом API
+// Возвращаем пустой массив
 export async function getIntegrations(): Promise<Integration[]> {
   try {
     // Эндпоинт пока не реализован в backend

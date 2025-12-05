@@ -1,10 +1,13 @@
 import { TicketResult, Ticket, TicketListResponse, Comment, Feedback, Template } from '../types';
 import { storage } from './storage';
 import { apiRequest } from './apiConfig';
+import { api } from './apiGenerated';
+import type { TicketCreate, TicketResponse, TicketUpdate } from './apiGenerated';
 
 export async function submitTicketToAPI(text: string): Promise<TicketResult> {
   const user = storage.getUser();
-  const userEmail = user?.email || 'guest@user.com';
+  // В новом API user_id должен быть UUID
+  const userId = user?.userId || user?.email || 'guest@user.com';
   
   // Разделяем текст на subject и body (если есть перенос строки)
   const lines = text.split('\n');
@@ -12,25 +15,28 @@ export async function submitTicketToAPI(text: string): Promise<TicketResult> {
   const body = text;
 
   try {
-    const data = await apiRequest<any>('/submit_ticket', {
-      method: 'POST',
-      body: JSON.stringify({
-        user_id: userEmail,
-        problem_description: body,
-        subject: subject,
-        language: 'ru' // Можно добавить переключатель языка
-      }),
-    });
+    // Используем новый сгенерированный API
+    const ticketData: TicketCreate = {
+      source: 'portal',
+      user_id: userId, // Должен быть UUID из localStorage (сохраняется при входе)
+      subject: subject,
+      body: body,
+      language: 'ru'
+    };
+    
+    const data: TicketResponse = await api.tickets.create(ticketData);
     
     // Определяем статус на основе результата
-    const isAutoClosed = data.status === 'Closed' || data.queue === 'Automated';
+    const isAutoClosed = data.status === 'closed' || data.status === 'auto_resolved' || data.auto_resolved;
     
     return {
       status: isAutoClosed ? 'success' : 'warning',
-      message: data.message || 'Заявка обработана',
-      needs_clarification: data.needs_clarification || false,
-      confidence_warning: data.confidence_warning || undefined,
-      queue: data.queue || undefined
+      message: `Заявка ${data.id} создана и обработана`,
+      needs_clarification: data.ai_confidence !== null && data.ai_confidence < 0.7,
+      confidence_warning: data.ai_confidence !== null && data.ai_confidence < 0.7 
+        ? `Низкая уверенность ИИ: ${(data.ai_confidence * 100).toFixed(1)}%` 
+        : undefined,
+      queue: data.assigned_department_id || undefined
     };
   } catch (error) {
     console.error('Error submitting ticket:', error);
@@ -58,7 +64,25 @@ export async function getTickets(
 }
 
 export async function getTicket(ticket_id: number): Promise<Ticket> {
-  return apiRequest<Ticket>(`/tickets/${ticket_id}`);
+  // Используем новый сгенерированный API
+  const ticket: TicketResponse = await api.tickets.getById(ticket_id.toString());
+  
+  // Преобразуем новый тип в старый для обратной совместимости
+  return {
+    id: parseInt(ticket.id) || ticket_id,
+    user_id: ticket.user_id,
+    problem_description: ticket.body,
+    status: ticket.status,
+    category: ticket.category_id || '',
+    priority: ticket.priority || '',
+    queue: ticket.assigned_department_id || '',
+    problem_type: ticket.issue_type || '',
+    needs_clarification: ticket.ai_confidence !== null && ticket.ai_confidence < 0.7,
+    subject: ticket.subject || '',
+    created_at: ticket.created_at,
+    updated_at: ticket.updated_at,
+    closed_at: ticket.closed_at || undefined
+  };
 }
 
 export async function updateTicket(
@@ -67,12 +91,34 @@ export async function updateTicket(
   priority?: string,
   category?: string,
   queue?: string,
-  comment?: string
+  _comment?: string // Пока не используется в новом API
 ): Promise<Ticket> {
-  return apiRequest<Ticket>(`/tickets/${ticket_id}`, {
-    method: 'PUT',
-    body: JSON.stringify({ status, priority, category, queue, comment }),
-  });
+  // Используем новый сгенерированный API
+  const updateData: TicketUpdate = {
+    status: status as any, // Преобразуем строку в тип TicketStatus
+    priority: priority as any, // Преобразуем строку в тип TicketPriority
+    category_id: category || undefined,
+    assigned_department_id: queue || undefined
+  };
+  
+  const ticket: TicketResponse = await api.tickets.update(ticket_id.toString(), updateData);
+  
+  // Преобразуем новый тип в старый для обратной совместимости
+  return {
+    id: parseInt(ticket.id) || ticket_id,
+    user_id: ticket.user_id,
+    problem_description: ticket.body,
+    status: ticket.status,
+    category: ticket.category_id || '',
+    priority: ticket.priority || '',
+    queue: ticket.assigned_department_id || '',
+    problem_type: ticket.issue_type || '',
+    needs_clarification: ticket.ai_confidence !== null && ticket.ai_confidence < 0.7,
+    subject: ticket.subject || '',
+    created_at: ticket.created_at,
+    updated_at: ticket.updated_at,
+    closed_at: ticket.closed_at || undefined
+  };
 }
 
 export async function getComments(ticket_id: number): Promise<Comment[]> {

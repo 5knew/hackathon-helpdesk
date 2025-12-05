@@ -7,7 +7,7 @@ import { showToast } from '../utils/toast';
 import { fetchMetrics } from '../utils/metrics';
 import { submitTicketToAPI, ticketExamples } from '../utils/ticket';
 import { exportMetricsToPDF } from '../utils/export';
-import { getUserTickets } from '../utils/api';
+import { api } from '../utils/apiGenerated';
 import { useLanguage } from '../contexts/LanguageContext';
 import { NotificationsPanel } from '../components/NotificationsPanel';
 
@@ -38,7 +38,10 @@ export const Dashboard: React.FC = () => {
 
   const loadNewTicketsCount = async () => {
     try {
-      const tickets = await getUserTickets({ status: ['Open', 'In Progress'] });
+      // Используем новый сгенерированный API
+      const tickets = await api.tickets.list({ 
+        status: 'in_work' // Статусы: 'new' | 'auto_resolved' | 'in_work' | 'waiting' | 'closed'
+      });
       setNewTicketsCount(tickets.length);
     } catch (error) {
       // Игнорируем ошибки
@@ -95,9 +98,26 @@ export const Dashboard: React.FC = () => {
 
   const handleExportMetrics = async () => {
     try {
-      const tickets = await getUserTickets();
+      // Используем новый сгенерированный API
+      const tickets = await api.tickets.list();
       if (metrics) {
-        exportMetricsToPDF(metrics, tickets);
+        // Преобразуем новые типы в старые для обратной совместимости
+        const oldTickets = tickets.map(t => ({
+          id: parseInt(t.id) || 0,
+          user_id: t.user_id,
+          problem_description: t.body,
+          status: t.status,
+          category: t.category_id || '',
+          priority: t.priority || '',
+          queue: t.assigned_department_id || '',
+          problem_type: t.issue_type || '',
+          needs_clarification: false,
+          subject: t.subject || '',
+          created_at: t.created_at,
+          updated_at: t.updated_at,
+          closed_at: t.closed_at || undefined
+        }));
+        exportMetricsToPDF(metrics, oldTickets);
         showToast(t('analytics.export_success'), 'success');
       }
     } catch (error) {

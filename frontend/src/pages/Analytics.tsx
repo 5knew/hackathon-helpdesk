@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { LineChart, Line, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { Metrics, Ticket } from '../types';
 import { fetchMetrics } from '../utils/metrics';
-import { getUserTickets } from '../utils/api';
+import { api } from '../utils/apiGenerated';
 import { exportMetricsToPDF, exportTicketsToCSV } from '../utils/export';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
@@ -32,12 +32,29 @@ export const Analytics: React.FC = () => {
   const loadData = async () => {
     setLoading(true);
     try {
+      // Используем новый сгенерированный API
       const [metricsData, ticketsData] = await Promise.all([
         fetchMetrics(),
-        getUserTickets()
+        api.tickets.list()
       ]);
       setMetrics(metricsData);
-      setTickets(ticketsData);
+      // Преобразуем новые типы в старые для обратной совместимости
+      const oldTickets: Ticket[] = ticketsData.map(t => ({
+        id: parseInt(t.id) || 0,
+        user_id: t.user_id,
+        problem_description: t.body,
+        status: t.status,
+        category: t.category_id || '',
+        priority: t.priority || '',
+        queue: t.assigned_department_id || '',
+        problem_type: t.issue_type || '',
+        needs_clarification: false,
+        subject: t.subject || '',
+        created_at: t.created_at,
+        updated_at: t.updated_at,
+        closed_at: t.closed_at || undefined
+      }));
+      setTickets(oldTickets);
     } catch (error) {
       showToast(t('analytics.load_error'), 'error');
     } finally {

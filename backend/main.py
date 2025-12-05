@@ -1,10 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import sqlite3
 import requests
 import os
+import re
 
 app = FastAPI()
 
@@ -44,6 +45,18 @@ class MetricsResponse(BaseModel):
     avg_response_time: float
     routing_errors: Dict[str, int]  # Метрики ошибок маршрутизации
     routing_error_rate: float  # Процент ошибок маршрутизации
+
+class SummarizeRequest(BaseModel):
+    ticket_id: Optional[int] = None
+    text: Optional[str] = None  # Если ticket_id не указан, можно передать текст напрямую
+    max_sentences: int = 3  # Максимальное количество предложений в резюме
+
+class SummarizeResponse(BaseModel):
+    summary: str
+    key_points: List[str]  # Ключевые моменты
+    original_length: int
+    summary_length: int
+    compression_ratio: float
 
 # --- Database Setup ---
 DB_NAME = "tickets.db"
@@ -122,6 +135,84 @@ def get_auto_reply_from_ml(text: str, category: str = None, problem_type: str = 
     except requests.exceptions.RequestException as e:
         print(f"Error calling ML service for auto-reply: {e}")
         return "Спасибо за обращение. Ваш запрос принят в работу. Мы свяжемся с вами в ближайшее время."
+
+def summarize_text(text: str, max_sentences: int = 3) -> Dict:
+    """
+    Резюмирует текст используя extractive summarization.
+    Использует простой подход: выбирает наиболее важные предложения.
+    """
+    if not text or len(text.strip()) < 50:
+        return {
+            "summary": text,
+            "key_points": [],
+            "original_length": len(text),
+            "summary_length": len(text),
+            "compression_ratio": 1.0
+        }
+    
+    # Разбиваем текст на предложения
+    sentences = re.split(r'[.!?]+\s+', text)
+    sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 10]
+    
+    if len(sentences) <= max_sentences:
+        # Если предложений мало, возвращаем весь текст
+        key_points = [s[:100] + "..." if len(s) > 100 else s for s in sentences[:3]]
+        return {
+            "summary": text,
+            "key_points": key_points,
+            "original_length": len(text),
+            "summary_length": len(text),
+            "compression_ratio": 1.0
+        }
+    
+    # Простой extractive summarization:
+    # 1. Берем первые предложения (обычно содержат основную информацию)
+    # 2. Берем предложения с ключевыми словами (проблема, ошибка, не могу, нужно и т.д.)
+    # 3. Берем предложения с вопросами
+    
+    key_words = ['проблема', 'ошибка', 'не могу', 'не работает', 'нужно', 'требуется', 
+                 'помогите', 'помощь', 'не получается', 'не удается', 'важно', 'срочно']
+    
+    scored_sentences = []
+    for i, sentence in enumerate(sentences):
+        score = 0
+        # Приоритет первым предложениям
+        if i < 2:
+            score += 2
+        # Приоритет предложениям с ключевыми словами
+        sentence_lower = sentence.lower()
+        for keyword in key_words:
+            if keyword in sentence_lower:
+                score += 1
+        # Приоритет предложениям с вопросами
+        if '?' in sentence:
+            score += 1
+        # Приоритет более длинным предложениям (но не слишком длинным)
+        if 20 < len(sentence) < 200:
+            score += 0.5
+        
+        scored_sentences.append((score, i, sentence))
+    
+    # Сортируем по score и берем топ-N
+    scored_sentences.sort(reverse=True, key=lambda x: x[0])
+    selected_indices = sorted([x[1] for x in scored_sentences[:max_sentences]])
+    summary_sentences = [sentences[i] for i in selected_indices]
+    
+    summary = '. '.join(summary_sentences)
+    if summary and not summary.endswith('.'):
+        summary += '.'
+    
+    # Извлекаем ключевые моменты (первые 3 предложения с высоким score)
+    key_points = [sentences[i][:100] + "..." if len(sentences[i]) > 100 else sentences[i] 
+                  for i in selected_indices[:3]]
+    
+    return {
+        "summary": summary,
+        "key_points": key_points,
+        "original_length": len(text),
+        "summary_length": len(summary),
+        "compression_ratio": round(len(summary) / len(text), 2) if text else 1.0
+    }
 
 
 # --- API Endpoints ---
@@ -391,3 +482,49 @@ def get_metrics():
         "routing_errors": routing_errors,
         "routing_error_rate": round(routing_error_rate, 2)
     }
+
+@app.post("/summarize", response_model=SummarizeResponse)
+def summarize_ticket(request: SummarizeRequest):
+    """
+    Резюмирует переписку по тикету для оператора.
+    Помогает операторам быстро понять суть проблемы.
+    """
+    try:
+        text_to_summarize = None
+        
+        if request.ticket_id:
+            # Получаем текст тикета из БД
+            db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            
+            ticket = cursor.execute(
+                "SELECT problem_description, subject FROM tickets WHERE id = ?",
+                (request.ticket_id,)
+            ).fetchone()
+            
+            conn.close()
+            
+            if not ticket:
+                from fastapi import HTTPException
+                raise HTTPException(status_code=404, detail=f"Тикет с ID {request.ticket_id} не найден")
+            
+            text_to_summarize = f"{ticket['subject']} {ticket['problem_description']}".strip()
+        elif request.text:
+            text_to_summarize = request.text
+        else:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=400, detail="Необходимо указать ticket_id или text")
+        
+        # Резюмируем текст
+        result = summarize_text(text_to_summarize, request.max_sentences)
+        
+        return SummarizeResponse(**result)
+        
+    except Exception as e:
+        import traceback
+        print(f"Error in summarize_ticket: {e}")
+        print(traceback.format_exc())
+        from fastapi import HTTPException
+        raise HTTPException(status_code=500, detail=f"Ошибка при резюмировании: {str(e)}")

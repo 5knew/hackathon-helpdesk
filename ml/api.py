@@ -1,5 +1,6 @@
 """
 FastAPI сервис для классификации тикетов и автоответа
+Использует FAISS для семантического поиска автоответов
 """
 
 from fastapi import FastAPI, HTTPException
@@ -7,8 +8,13 @@ from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer
 import joblib
 import os
-from typing import Optional
+import sys
+from typing import Optional, Dict
 import numpy as np
+
+# Добавляем путь для импорта auto_reply
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from auto_reply import AutoReplyService
 
 app = FastAPI(
     title="Helpdesk ML Service",
@@ -21,33 +27,16 @@ model = None
 clf_category = None
 clf_priority = None
 clf_problem_type = None
-
-# Модели для автоответа (можно расширить)
-sample_responses = {
-    "Техническая поддержка": [
-        "Спасибо за обращение. Наша техническая команда уже работает над решением вашей проблемы.",
-        "Мы получили ваш запрос. Технический специалист свяжется с вами в ближайшее время.",
-    ],
-    "IT поддержка": [
-        "Ваш запрос принят в работу. IT-отдел обработает его в течение 24 часов.",
-        "Спасибо за обращение. Мы уже работаем над решением вашей IT-проблемы.",
-    ],
-    "Биллинг и платежи": [
-        "Ваш запрос по биллингу получен. Мы обработаем его в течение 1-2 рабочих дней.",
-        "Спасибо за обращение. Финансовый отдел рассмотрит ваш вопрос.",
-    ],
-    "Клиентский сервис": [
-        "Благодарим за обращение. Наш специалист свяжется с вами в ближайшее время.",
-        "Ваш запрос принят. Мы ответим вам в течение рабочего дня.",
-    ],
-}
+auto_reply_service = None  # FAISS сервис для автоответа
 
 # Загрузка моделей при старте
 @app.on_event("startup")
 async def load_models():
-    global model, clf_category, clf_priority, clf_problem_type
+    global model, clf_category, clf_priority, clf_problem_type, auto_reply_service
     
-    print("Загрузка моделей...")
+    print("=" * 60)
+    print("ЗАГРУЗКА МОДЕЛЕЙ")
+    print("=" * 60)
     
     # Загрузка модели эмбеддингов
     model_path = "models/sentence_transformer_model"
@@ -60,11 +49,29 @@ async def load_models():
         print("✅ Модель эмбеддингов загружена из HuggingFace")
     
     # Загрузка классификаторов
+    print("\nЗагрузка классификаторов...")
     clf_category = joblib.load("models/classifier_category.pkl")
     clf_priority = joblib.load("models/classifier_priority.pkl")
     clf_problem_type = joblib.load("models/classifier_problem_type.pkl")
+    print("✅ Классификаторы загружены")
     
-    print("✅ Все модели загружены!")
+    # Загрузка сервиса автоответа с FAISS
+    print("\nИнициализация сервиса автоответа (FAISS)...")
+    try:
+        auto_reply_service = AutoReplyService(
+            responses_path="responses.json",
+            model_path=model_path if os.path.exists(model_path) else None,
+            similarity_threshold=0.65
+        )
+        print("✅ Сервис автоответа инициализирован")
+    except Exception as e:
+        print(f"⚠️  Ошибка при загрузке сервиса автоответа: {e}")
+        print("   Будет использован упрощенный режим")
+        auto_reply_service = None
+    
+    print("\n" + "=" * 60)
+    print("✅ ВСЕ МОДЕЛИ ЗАГРУЖЕНЫ!")
+    print("=" * 60)
 
 # Модели запросов
 class TicketRequest(BaseModel):
@@ -80,10 +87,14 @@ class PredictionResponse(BaseModel):
 class AutoReplyRequest(BaseModel):
     text: str
     category: Optional[str] = None
+    problem_type: Optional[str] = None
+    language: Optional[str] = None  # 'ru' или 'kz'
 
 class AutoReplyResponse(BaseModel):
     reply: str
     category: str
+    can_auto_reply: Optional[bool] = True
+    similarity: Optional[float] = None
 
 # Эндпоинты
 @app.get("/")
@@ -107,7 +118,8 @@ async def health():
             clf_category is not None,
             clf_priority is not None,
             clf_problem_type is not None
-        ])
+        ]),
+        "auto_reply_service_loaded": auto_reply_service is not None
     }
 
 @app.post("/predict", response_model=PredictionResponse)
@@ -160,33 +172,72 @@ async def predict_ticket(ticket: TicketRequest):
 async def auto_reply(request: AutoReplyRequest):
     """
     Генерация автоответа на основе текста тикета
+    Использует FAISS семантический поиск для поиска наиболее подходящего ответа
     """
     if model is None:
         raise HTTPException(status_code=503, detail="Модели не загружены")
     
     try:
-        # Если категория не указана, определяем её
+        # Если категория не указана, определяем её через классификацию
         if request.category:
             category = request.category
         else:
-            # Используем упрощенный подход: классифицируем текст
             embedding = model.encode([request.text])
             category = clf_category.predict(embedding)[0]
         
-        # Выбираем ответ из шаблонов для данной категории
-        if category in sample_responses:
-            # Простой подход: берем первый шаблон
-            # В будущем можно использовать семантический поиск
-            reply = sample_responses[category][0]
+        # Если problem_type не указан, определяем его
+        if request.problem_type is None:
+            embedding = model.encode([request.text])
+            problem_type = clf_problem_type.predict(embedding)[0]
         else:
-            # Универсальный ответ
-            reply = "Спасибо за обращение. Ваш запрос принят в работу. Мы свяжемся с вами в ближайшее время."
+            problem_type = request.problem_type
         
-        return AutoReplyResponse(
-            reply=reply,
-            category=category
-        )
+        # Используем FAISS сервис для поиска лучшего ответа
+        if auto_reply_service is not None:
+            result = auto_reply_service.get_auto_reply(
+                query=request.text,
+                problem_type=problem_type,
+                category=category,
+                language=request.language
+            )
+            
+            if result.get('can_auto_reply', False):
+                return AutoReplyResponse(
+                    reply=result.get('response_text', 'Спасибо за обращение. Ваш запрос принят в работу.'),
+                    category=result.get('category', category),
+                    can_auto_reply=True,
+                    similarity=result.get('similarity', 0.0)
+                )
+            else:
+                # Не можем ответить автоматически, возвращаем стандартный ответ
+                return AutoReplyResponse(
+                    reply="Спасибо за обращение. Ваш запрос принят в работу. Наш специалист свяжется с вами в ближайшее время.",
+                    category=category,
+                    can_auto_reply=False,
+                    similarity=result.get('similarity', 0.0)
+                )
+        else:
+            # Fallback: упрощенный режим без FAISS
+            fallback_responses = {
+                "Техническая поддержка": "Спасибо за обращение. Наша техническая команда уже работает над решением вашей проблемы.",
+                "IT поддержка": "Ваш запрос принят в работу. IT-отдел обработает его в течение 24 часов.",
+                "Биллинг и платежи": "Ваш запрос по биллингу получен. Мы обработаем его в течение 1-2 рабочих дней.",
+                "Клиентский сервис": "Благодарим за обращение. Наш специалист свяжется с вами в ближайшее время.",
+            }
+            
+            reply = fallback_responses.get(category, "Спасибо за обращение. Ваш запрос принят в работу. Мы свяжемся с вами в ближайшее время.")
+            
+            return AutoReplyResponse(
+                reply=reply,
+                category=category,
+                can_auto_reply=(problem_type == "Типовой"),
+                similarity=0.0
+            )
+            
     except Exception as e:
+        import traceback
+        print(f"Ошибка при генерации автоответа: {e}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Ошибка при генерации ответа: {str(e)}")
 
 if __name__ == "__main__":

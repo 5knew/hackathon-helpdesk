@@ -98,16 +98,23 @@ def classify_ticket_with_ml(problem_description: str, subject: str = ""):
             "confidence": {}
         }
 
-def get_auto_reply_from_ml(text: str, category: str = None):
-    """Gets an automated reply from the ML service."""
+def get_auto_reply_from_ml(text: str, category: str = None, problem_type: str = None):
+    """Gets an automated reply from the ML service using FAISS semantic search."""
     try:
         payload = {"text": text}
         if category:
             payload["category"] = category
+        if problem_type:
+            payload["problem_type"] = problem_type
         response = requests.post(f"{ML_SERVICE_URL}/auto_reply", json=payload, timeout=10)
         response.raise_for_status()
         result = response.json()
-        return result.get("reply", "Спасибо за обращение. Ваш запрос принят в работу.")
+        # Проверяем, может ли система ответить автоматически
+        if result.get("can_auto_reply", True):
+            return result.get("reply", "Спасибо за обращение. Ваш запрос принят в работу.")
+        else:
+            # Если не может ответить автоматически, возвращаем стандартный ответ
+            return "Спасибо за обращение. Ваш запрос принят в работу. Наш специалист свяжется с вами в ближайшее время."
     except requests.exceptions.RequestException as e:
         print(f"Error calling ML service for auto-reply: {e}")
         return "Спасибо за обращение. Ваш запрос принят в работу. Мы свяжемся с вами в ближайшее время."
@@ -143,10 +150,16 @@ def submit_ticket(ticket: Ticket):
         # A. Проверка типа проблемы (Типовой = автоматическое решение)
         if problem_type == "Типовой":
             # Автоматическое решение типовых инцидентов (~50% заявок)
-            status = "Closed"
-            queue = "Automated"
-            message = get_auto_reply_from_ml(ticket.problem_description, category)
-            message += f" (Автоматически закрыто. Категория: {category})"
+            auto_reply = get_auto_reply_from_ml(ticket.problem_description, category, problem_type)
+            if auto_reply:
+                status = "Closed"
+                queue = "Automated"
+                message = auto_reply + f" (Автоматически закрыто. Категория: {category})"
+            else:
+                # Если не можем ответить автоматически, отправляем в общую очередь
+                status = "Pending"
+                queue = "GeneralSupport"
+                message = f"Заявка принята в обработку. Категория: {category}"
         
         else:
             # B. Маршрутизация сложных кейсов в профильные департаменты

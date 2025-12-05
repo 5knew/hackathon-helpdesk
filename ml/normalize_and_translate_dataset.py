@@ -239,11 +239,13 @@ class DatasetTranslator:
         else:
             # Перевод
             try:
-                if TRANSLATOR_AVAILABLE:
+                if TRANSLATOR_AVAILABLE and self.translator_ru and self.translator_kz:
                     if target_lang == 'ru':
                         result = self.translator_ru.translate(text[:4500])  # Лимит API
-                    else:
+                    elif target_lang == 'kz':
                         result = self.translator_kz.translate(text[:4500])
+                    else:
+                        result = text
                 else:
                     result = text
             except Exception as e:
@@ -407,6 +409,9 @@ def normalize_and_translate_dataset(input_file: str, output_file: str,
     # Создание дубликатов для RU/KZ с оптимизацией
     print("\n4. Создание дубликатов для RU/KZ...")
     
+    # Инициализируем text_mapping до блока условия
+    text_mapping = {}  # оригинал -> {ru: переведенный, kz: переведенный}
+    
     if translate and translator:
         print("   ⚠️  Перевод может занять много времени.")
         print("   💡 Рекомендация: используйте --sample для тестирования")
@@ -415,7 +420,6 @@ def normalize_and_translate_dataset(input_file: str, output_file: str,
         # Собираем все уникальные тексты для перевода (оптимизация)
         print("\n   Оптимизация: сбор уникальных текстов...")
         unique_texts = set()
-        text_mapping = {}  # оригинал -> {ru: переведенный, kz: переведенный}
         
         for idx, row in df.iterrows():
             for field in ['subject', 'body', 'answer']:
@@ -466,7 +470,7 @@ def normalize_and_translate_dataset(input_file: str, output_file: str,
             new_row['language'] = target_lang
             
             # Применяем переводы из кэша
-            if translate and translator and 'text_mapping' in locals():
+            if translate and translator and text_mapping:
                 for field in ['subject', 'body', 'answer']:
                     if field in new_row and pd.notna(new_row[field]):
                         text = str(new_row[field]).strip()

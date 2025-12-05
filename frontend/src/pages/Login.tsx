@@ -5,8 +5,10 @@ import { Chip } from '../components/Chip';
 import { Badge } from '../components/Badge';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
+import { useLanguage } from '../contexts/LanguageContext';
 
 export const Login: React.FC = () => {
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
@@ -17,17 +19,17 @@ export const Login: React.FC = () => {
     const user = storage.getUser();
 
     if (!trimmedEmail || !trimmedPassword) {
-      showToast('Введите email и пароль', 'error');
+      showToast(t('login.enter_email'), 'error');
       return;
     }
 
     if (!user || user.email !== trimmedEmail || user.password !== trimmedPassword) {
-      showToast('Неверный логин или пароль', 'error');
+      showToast(t('login.wrong_credentials'), 'error');
       return;
     }
 
     storage.setLogged(true);
-    showToast('Успешный вход!', 'success');
+    showToast(t('login.success'), 'success');
     setTimeout(() => navigate('/dashboard'), 500);
   };
 
@@ -37,28 +39,26 @@ export const Login: React.FC = () => {
 
       <main className="auth-layout">
         <section className="auth-hero card glass">
-          <div className="eyebrow">Экспресс-поддержка</div>
-          <h1>
-            Единый вход для заявок, <span className="grad-text">автоматических решений</span> и мониторинга.
-          </h1>
+          <div className="eyebrow">{t('login.eyebrow')}</div>
+          <h1 dangerouslySetInnerHTML={{ __html: t('login.title').replace('<span>', '<span class="grad-text">') }} />
           <p className="muted">
-            Отправляйте обращения, отслеживайте результат и смотрите показатели качества AI в одном месте.
+            {t('login.desc')}
           </p>
 
           <div className="chips">
-            <Chip>0.8s среднее время ответа</Chip>
-            <Chip variant="success">72% авто-решений</Chip>
-            <Chip variant="warning">SLA 99.1%</Chip>
+            <Chip>{t('login.avg_response')}</Chip>
+            <Chip variant="success">{t('login.auto_resolutions')}</Chip>
+            <Chip variant="warning">{t('login.sla')}</Chip>
           </div>
 
           <div className="mini-grid">
             <div className="mini-card">
-              <p className="label">Метрики</p>
-              <p className="stat">В реальном времени</p>
+              <p className="label">{t('login.metrics')}</p>
+              <p className="stat">{t('login.metrics_desc')}</p>
             </div>
             <div className="mini-card">
-              <p className="label">Вход</p>
-              <p className="stat">Единая точка</p>
+              <p className="label">{t('login.entry')}</p>
+              <p className="stat">{t('login.entry_desc')}</p>
             </div>
           </div>
         </section>
@@ -66,15 +66,15 @@ export const Login: React.FC = () => {
         <section className="auth-card card">
           <div className="auth-header">
             <div>
-              <p className="eyebrow">Войти</p>
-              <h2>Добро пожаловать 👋</h2>
-              <p className="muted">Используйте демо-учётку или зарегистрируйте новую.</p>
+              <p className="eyebrow">{t('common.login')}</p>
+              <h2>{t('login.welcome')}</h2>
+              <p className="muted">{t('login.demo_desc')}</p>
             </div>
             <Badge variant="subtle">Demo only</Badge>
           </div>
 
           <div className="field">
-            <label htmlFor="loginEmail">Email</label>
+            <label htmlFor="loginEmail">{t('common.email')}</label>
             <input
               id="loginEmail"
               type="email"
@@ -87,7 +87,7 @@ export const Login: React.FC = () => {
           </div>
 
           <div className="field">
-            <label htmlFor="loginPassword">Пароль</label>
+            <label htmlFor="loginPassword">{t('common.password')}</label>
             <input
               id="loginPassword"
               type="password"
@@ -100,13 +100,13 @@ export const Login: React.FC = () => {
           </div>
 
           <button className="primary" onClick={handleLogin}>
-            Войти
+            {t('common.login')}
           </button>
 
           <div className="auth-footer">
-            <span className="muted">Нет аккаунта?</span>
+            <span className="muted">{t('common.no_account')}</span>
             <Link className="link" to="/register">
-              Создать
+              {t('common.create')}
             </Link>
           </div>
         </section>

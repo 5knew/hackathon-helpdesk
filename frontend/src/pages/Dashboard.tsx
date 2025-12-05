@@ -1,18 +1,24 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { Chip } from '../components/Chip';
 import { Metrics, TicketResult } from '../types';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
 import { fetchMetrics } from '../utils/metrics';
 import { submitTicketToAPI, ticketExamples } from '../utils/ticket';
+import { exportMetricsToPDF } from '../utils/export';
+import { getUserTickets } from '../utils/api';
+import { useLanguage } from '../contexts/LanguageContext';
+import { NotificationsPanel } from '../components/NotificationsPanel';
 
 export const Dashboard: React.FC = () => {
+  const { t } = useLanguage();
   const [ticketText, setTicketText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [ticketResult, setTicketResult] = useState<TicketResult | null>(null);
   const [metrics, setMetrics] = useState<Metrics | null>(null);
   const [userEmail, setUserEmail] = useState('demo@user');
+  const [newTicketsCount, setNewTicketsCount] = useState(0);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -27,7 +33,17 @@ export const Dashboard: React.FC = () => {
     }
 
     loadMetrics();
+    loadNewTicketsCount();
   }, [navigate]);
+
+  const loadNewTicketsCount = async () => {
+    try {
+      const tickets = await getUserTickets({ status: ['Open', 'In Progress'] });
+      setNewTicketsCount(tickets.length);
+    } catch (error) {
+      // Игнорируем ошибки
+    }
+  };
 
   const handleLogout = () => {
     storage.setLogged(false);
@@ -38,7 +54,7 @@ export const Dashboard: React.FC = () => {
     const trimmedText = ticketText.trim();
 
     if (!trimmedText) {
-      showToast('Введите текст заявки', 'error');
+      showToast(t('dashboard.ticket.text_label'), 'error');
       return;
     }
 
@@ -48,8 +64,9 @@ export const Dashboard: React.FC = () => {
     try {
       const result = await submitTicketToAPI(trimmedText);
       setTicketResult(result);
+      loadNewTicketsCount(); // Обновляем счетчик новых заявок
     } catch (error) {
-      showToast('Ошибка при отправке заявки', 'error');
+      showToast(t('error.submit_ticket'), 'error');
     } finally {
       setIsSubmitting(false);
     }
@@ -69,10 +86,22 @@ export const Dashboard: React.FC = () => {
     try {
       const newMetrics = await fetchMetrics();
       setMetrics(newMetrics);
-      showToast('Метрики обновлены', 'success');
+      showToast(t('error.metrics_updated'), 'success');
     } catch (error) {
       console.error('Error loading metrics:', error);
-      showToast('Ошибка загрузки метрик', 'error');
+      showToast(t('error.load_metrics'), 'error');
+    }
+  };
+
+  const handleExportMetrics = async () => {
+    try {
+      const tickets = await getUserTickets();
+      if (metrics) {
+        exportMetricsToPDF(metrics, tickets);
+        showToast(t('analytics.export_success'), 'success');
+      }
+    } catch (error) {
+      showToast('Ошибка экспорта', 'error');
     }
   };
 
@@ -109,14 +138,45 @@ export const Dashboard: React.FC = () => {
         <div className="brand">
           <div className="logo-dot"></div>
           <div>
-            <p className="brand-name">AI AutoResponder</p>
-            <span className="brand-sub">Панель мониторинга</span>
+            <p className="brand-name">{t('app.name')}</p>
+            <span className="brand-sub">{t('dashboard.title')}</span>
           </div>
         </div>
         <div className="topbar-actions">
+          <Link to="/tickets" className="ghost" style={{ position: 'relative', marginRight: '12px' }}>
+            {t('nav.tickets')}
+            {newTicketsCount > 0 && (
+              <span
+                style={{
+                  position: 'absolute',
+                  top: '-8px',
+                  right: '-8px',
+                  background: '#dc3545',
+                  color: 'white',
+                  borderRadius: '50%',
+                  width: '20px',
+                  height: '20px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.75em',
+                  fontWeight: 'bold'
+                }}
+              >
+                {newTicketsCount > 9 ? '9+' : newTicketsCount}
+              </span>
+            )}
+          </Link>
+          <Link to="/analytics" className="ghost" style={{ marginRight: '12px' }}>
+            {t('nav.analytics')}
+          </Link>
+          <Link to="/settings" className="ghost" style={{ marginRight: '12px' }}>
+            {t('nav.settings')}
+          </Link>
+          <NotificationsPanel />
           <div className="chip ghost">{userEmail}</div>
           <button className="ghost" onClick={handleLogout}>
-            Выйти
+            {t('common.logout')}
           </button>
         </div>
       </header>
@@ -124,11 +184,10 @@ export const Dashboard: React.FC = () => {
       <main className="dashboard-grid">
         <section className="card hero-card">
           <div>
-            <div className="eyebrow">Единый вход • Мониторинг</div>
-            <h1>Отправляйте заявки и мгновенно видьте результат работы AI.</h1>
+            <div className="eyebrow">{t('dashboard.hero.eyebrow')}</div>
+            <h1>{t('dashboard.hero.title')}</h1>
             <p className="muted">
-              Имитация Core API: отправляем обращение, показываем статус ("закрыто автоматически" или "передано в
-              отдел") и метрики качества.
+              {t('dashboard.hero.desc')}
             </p>
             <div className="chips">
               <Chip variant="success">Live demo</Chip>
@@ -138,13 +197,13 @@ export const Dashboard: React.FC = () => {
           </div>
           <div className="hero-metrics">
             <div className="hero-metric">
-              <p className="label">Авто-решений</p>
+              <p className="label">{t('dashboard.metrics.auto_resolutions')}</p>
               <p className="stat" id="autoPercentHero">
                 —
               </p>
             </div>
             <div className="hero-metric">
-              <p className="label">Точность AI</p>
+              <p className="label">{t('dashboard.metrics.ai_accuracy')}</p>
               <p className="stat" id="accuracyPercentHero">
                 —
               </p>
@@ -155,19 +214,19 @@ export const Dashboard: React.FC = () => {
         <section className="card ticket-card">
           <div className="section-head">
             <div>
-              <p className="eyebrow">Новая заявка</p>
-              <h3>Опишите проблему</h3>
-              <p className="muted">Текст отправится на Core API (имитация). Возвратим статус обработки.</p>
+              <p className="eyebrow">{t('dashboard.ticket.title')}</p>
+              <h3>{t('dashboard.ticket.label')}</h3>
+              <p className="muted">{t('dashboard.ticket.desc')}</p>
             </div>
             <button className="ghost" onClick={handleClearTicket}>
-              Очистить
+              {t('common.clear')}
             </button>
           </div>
           <div className="field">
-            <label htmlFor="ticketText">Текст заявки</label>
+            <label htmlFor="ticketText">{t('dashboard.ticket.text_label')}</label>
             <textarea
               id="ticketText"
-              placeholder="Например: Не получается войти в корпоративную почту"
+              placeholder={t('dashboard.ticket.placeholder')}
               rows={5}
               value={ticketText}
               onChange={(e) => setTicketText(e.target.value)}
@@ -175,14 +234,14 @@ export const Dashboard: React.FC = () => {
           </div>
           <div className="actions">
             <button className="secondary" onClick={handlePrefillTicket}>
-              Заполнить пример
+              {t('dashboard.ticket.fill_example')}
             </button>
             <button className="primary" id="submitBtn" onClick={handleSubmitTicket} disabled={isSubmitting}>
-              {isSubmitting ? 'Отправляем...' : 'Отправить'}
+              {isSubmitting ? t('common.submitting') : t('common.submit')}
             </button>
           </div>
           <div className="result-wrapper">
-            <p className="label">Результат обработки</p>
+            <p className="label">{t('dashboard.ticket.result')}</p>
             <div
               className={`result-box ${ticketResult ? 'show' : ''} ${isSubmitting ? 'pending' : ''}`}
               data-status={ticketResult?.status || ''}
@@ -190,24 +249,24 @@ export const Dashboard: React.FC = () => {
               {isSubmitting ? (
                 <>
                   <div className="loader"></div>
-                  <p>AI анализирует заявку...</p>
+                  <p>{t('dashboard.ticket.analyzing')}</p>
                 </>
               ) : ticketResult ? (
                 <>
                   {ticketResult.message}
                   {ticketResult.needs_clarification && (
                     <div style={{ marginTop: '8px', padding: '8px', background: '#fff3cd', borderRadius: '4px', fontSize: '0.9em' }}>
-                      ⚠️ Требуется уточнение: {ticketResult.confidence_warning}
+                      ⚠️ {t('dashboard.ticket.needs_clarification')}: {ticketResult.confidence_warning}
                     </div>
                   )}
                   {ticketResult.queue && (
                     <div style={{ marginTop: '4px', fontSize: '0.85em', color: '#666' }}>
-                      Очередь: {ticketResult.queue}
+                      {t('dashboard.ticket.queue')}: {ticketResult.queue}
                     </div>
                   )}
                 </>
               ) : (
-                'Пока нет результата'
+                t('dashboard.ticket.no_result')
               )}
             </div>
           </div>
@@ -216,19 +275,24 @@ export const Dashboard: React.FC = () => {
         <section className="card metrics-card">
           <div className="section-head">
             <div>
-              <p className="eyebrow">Мониторинг</p>
-              <h3>Метрики качества</h3>
-              <p className="muted">Данные из /metrics (имитация). Нажмите «Обновить», чтобы пересчитать.</p>
+              <p className="eyebrow">{t('dashboard.metrics.title')}</p>
+              <h3>{t('dashboard.metrics.subtitle')}</h3>
+              <p className="muted">{t('dashboard.metrics.desc')}</p>
             </div>
-            <button className="ghost" onClick={loadMetrics}>
-              Обновить
-            </button>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="secondary" onClick={handleExportMetrics}>
+                {t('dashboard.export.pdf')}
+              </button>
+              <button className="ghost" onClick={loadMetrics}>
+                {t('common.update')}
+              </button>
+            </div>
           </div>
 
           <div className="metric-grid">
             <div className="metric-tile">
               <div className="metric-top">
-                <p>Автоматические решения</p>
+                <p>{t('dashboard.metrics.auto')}</p>
                 <span className="pill success">AI</span>
               </div>
               <p className="metric-value" id="autoPercent">
@@ -241,7 +305,7 @@ export const Dashboard: React.FC = () => {
 
             <div className="metric-tile">
               <div className="metric-top">
-                <p>Точность классификации</p>
+                <p>{t('dashboard.metrics.accuracy')}</p>
                 <span className="pill info">ML</span>
               </div>
               <p className="metric-value" id="accuracyPercent">
@@ -254,7 +318,7 @@ export const Dashboard: React.FC = () => {
 
             <div className="metric-tile">
               <div className="metric-top">
-                <p>Время ответа</p>
+                <p>{t('dashboard.metrics.sla')}</p>
                 <span className="pill warning">SLA</span>
               </div>
               <p className="metric-value" id="slaPercent">
@@ -267,7 +331,7 @@ export const Dashboard: React.FC = () => {
 
             <div className="metric-tile">
               <div className="metric-top">
-                <p>Очередь заявок</p>
+                <p>{t('dashboard.metrics.backlog')}</p>
                 <span className="pill neutral">OPS</span>
               </div>
               <p className="metric-value" id="backlogValue">
@@ -281,7 +345,7 @@ export const Dashboard: React.FC = () => {
             {metrics?.csat && (
               <div className="metric-tile">
                 <div className="metric-top">
-                  <p>Удовлетворенность клиентов</p>
+                  <p>{t('dashboard.metrics.csat')}</p>
                   <span className="pill success">CSAT</span>
                 </div>
                 <p className="metric-value" id="csatPercent">
@@ -296,7 +360,7 @@ export const Dashboard: React.FC = () => {
             {metrics?.routing_error_rate !== undefined && (
               <div className="metric-tile">
                 <div className="metric-top">
-                  <p>Ошибки маршрутизации</p>
+                  <p>{t('dashboard.metrics.routing_errors')}</p>
                   <span className="pill warning">ERR</span>
                 </div>
                 <p className="metric-value" id="routingErrorPercent">
@@ -307,8 +371,8 @@ export const Dashboard: React.FC = () => {
                 </div>
                 {metrics.routing_errors && (
                   <div style={{ marginTop: '8px', fontSize: '0.75em', color: '#666' }}>
-                    Ручная проверка: {metrics.routing_errors.manual_review || 0} | 
-                    Низкая уверенность: {metrics.routing_errors.low_confidence || 0}
+                    {t('dashboard.metrics.manual_review')}: {metrics.routing_errors.manual_review || 0} | 
+                    {t('dashboard.metrics.low_confidence')}: {metrics.routing_errors.low_confidence || 0}
                   </div>
                 )}
               </div>

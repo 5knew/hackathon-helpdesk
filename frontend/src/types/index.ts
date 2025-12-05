@@ -29,3 +29,71 @@ export interface TicketResult {
 
 export type ToastType = 'info' | 'success' | 'error';
 
+// Расширенные типы для новой функциональности
+export interface Ticket {
+  id: number;
+  user_id: string;
+  subject: string;
+  problem_description: string;
+  status: 'Open' | 'In Progress' | 'Closed' | 'Waiting';
+  category: string;
+  priority: 'Низкий' | 'Средний' | 'Высокий';
+  problem_type: 'Типовой' | 'Сложный';
+  queue: string;
+  created_at: string;
+  updated_at: string;
+  closed_at?: string;
+  auto_closed?: boolean;
+  sla_deadline?: string;
+  csat_score?: number;
+  csat_comment?: string;
+}
+
+export interface Comment {
+  id: number;
+  ticket_id: number;
+  author: string;
+  author_type: 'user' | 'operator' | 'system';
+  text: string;
+  created_at: string;
+  is_auto_reply?: boolean;
+}
+
+export interface TicketHistory {
+  id: number;
+  ticket_id: number;
+  action: string;
+  changed_by: string;
+  old_value?: string;
+  new_value?: string;
+  created_at: string;
+}
+
+export interface TicketFilter {
+  status?: string[];
+  category?: string[];
+  priority?: string[];
+  dateFrom?: string;
+  dateTo?: string;
+  search?: string;
+}
+
+export interface Template {
+  id: number;
+  name: string;
+  category: string;
+  text: string;
+  language: 'ru' | 'kz';
+}
+
+export interface Integration {
+  id: string;
+  name: string;
+  type: 'email' | 'slack' | 'telegram' | 'webhook';
+  enabled: boolean;
+  last_sync?: string;
+  config?: Record<string, any>;
+}
+
+export type Language = 'ru' | 'kz' | 'en';
+

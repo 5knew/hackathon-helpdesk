@@ -5,8 +5,10 @@ import { Chip } from '../components/Chip';
 import { Badge } from '../components/Badge';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
+import { useLanguage } from '../contexts/LanguageContext';
 
 export const Register: React.FC = () => {
+  const { t } = useLanguage();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
@@ -16,47 +18,45 @@ export const Register: React.FC = () => {
     const trimmedPassword = password.trim();
 
     if (!trimmedEmail || !trimmedPassword) {
-      showToast('Введите email и пароль', 'error');
+      showToast(t('register.enter_data'), 'error');
       return;
     }
 
     storage.saveUser(trimmedEmail, trimmedPassword);
     storage.setLogged(true);
 
-    showToast('Регистрация успешна', 'success');
+    showToast(t('register.success'), 'success');
     setTimeout(() => navigate('/dashboard'), 600);
   };
 
   return (
     <div className="page-shell">
-      <BrandBar rightContent={<Link className="link muted" to="/">Уже есть аккаунт?</Link>} />
+      <BrandBar rightContent={<Link className="link muted" to="/">{t('common.has_account')}</Link>} />
 
       <main className="auth-layout">
         <section className="auth-hero card glass">
-          <div className="eyebrow">Регистрация</div>
-          <h1>
-            Создайте доступ и подключайтесь к <span className="grad-text">панели мониторинга</span>.
-          </h1>
-          <p className="muted">Сохраняем логин в браузере, чтобы быстро показать прототип без сервера.</p>
+          <div className="eyebrow">{t('register.eyebrow')}</div>
+          <h1 dangerouslySetInnerHTML={{ __html: t('register.title').replace('<span>', '<span class="grad-text">') }} />
+          <p className="muted">{t('register.desc')}</p>
           <div className="chips">
-            <Chip>Демо-данные</Chip>
-            <Chip variant="success">Быстрая настройка</Chip>
-            <Chip variant="warning">Без бэкенда</Chip>
+            <Chip>{t('register.demo')}</Chip>
+            <Chip variant="success">{t('register.quick_setup')}</Chip>
+            <Chip variant="warning">{t('register.no_backend')}</Chip>
           </div>
         </section>
 
         <section className="auth-card card">
           <div className="auth-header">
             <div>
-              <p className="eyebrow">Создать аккаунт</p>
-              <h2>3 шага и вы в системе</h2>
-              <p className="muted">Email и пароль сохраняются локально.</p>
+              <p className="eyebrow">{t('common.create_account')}</p>
+              <h2>{t('register.steps')}</h2>
+              <p className="muted">{t('register.local_desc')}</p>
             </div>
             <Badge variant="subtle">Demo only</Badge>
           </div>
 
           <div className="field">
-            <label htmlFor="regEmail">Email</label>
+            <label htmlFor="regEmail">{t('common.email')}</label>
             <input
               id="regEmail"
               type="email"
@@ -69,7 +69,7 @@ export const Register: React.FC = () => {
           </div>
 
           <div className="field">
-            <label htmlFor="regPassword">Пароль</label>
+            <label htmlFor="regPassword">{t('common.password')}</label>
             <input
               id="regPassword"
               type="password"
@@ -82,13 +82,13 @@ export const Register: React.FC = () => {
           </div>
 
           <button className="primary" onClick={handleRegister}>
-            Создать аккаунт
+            {t('common.create_account')}
           </button>
 
           <div className="auth-footer">
-            <span className="muted">Уже есть доступ?</span>
+            <span className="muted">{t('common.has_account')}</span>
             <Link className="link" to="/">
-              Войти
+              {t('common.login')}
             </Link>
           </div>
         </section>

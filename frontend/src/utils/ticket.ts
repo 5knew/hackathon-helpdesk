@@ -38,7 +38,10 @@ export async function submitTicketToAPI(text: string): Promise<TicketResult> {
     
     return {
       status: isAutoClosed ? 'success' : 'warning',
-      message: data.message || 'Заявка обработана'
+      message: data.message || 'Заявка обработана',
+      needs_clarification: data.needs_clarification || false,
+      confidence_warning: data.confidence_warning || undefined,
+      queue: data.queue || undefined
     };
   } catch (error) {
     console.error('Error submitting ticket:', error);

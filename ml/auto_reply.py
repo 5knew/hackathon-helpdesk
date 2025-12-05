@@ -5,6 +5,7 @@
 
 import json
 import os
+import hashlib
 import numpy as np
 from sentence_transformers import SentenceTransformer
 import faiss
@@ -15,9 +16,11 @@ import joblib
 class AutoReplyService:
     """Сервис для автоматического ответа на типовые вопросы"""
     
-    def __init__(self, responses_path: str = "responses.json", 
+    def __init__(self, responses_path: str = "responses.json",
                  model_path: str = None,
-                 similarity_threshold: float = 0.65):
+                 similarity_threshold: float = 0.65,
+                 index_path: str = "models/faiss_index.bin",
+                 metadata_path: str = "models/faiss_index_meta.json"):
         """
         Инициализация сервиса автоответа
         
@@ -25,9 +28,13 @@ class AutoReplyService:
             responses_path: путь к файлу с шаблонами ответов
             model_path: путь к модели sentence-transformers (если None, загружается из models/)
             similarity_threshold: порог схожести для автоответа (0-1)
+            index_path: путь для сохранения/загрузки FAISS индекса
+            metadata_path: путь для сохранения/загрузки метаданных индекса
         """
         self.similarity_threshold = similarity_threshold
         self.responses_path = responses_path
+        self.index_path = index_path
+        self.metadata_path = metadata_path
         
         # Загрузка модели эмбеддингов
         print("Загрузка модели для эмбеддингов...")
@@ -44,11 +51,12 @@ class AutoReplyService:
         # Загрузка шаблонов ответов
         self.responses = self._load_responses()
         
-        # Создание FAISS индекса
+        # Создание/загрузка FAISS индекса
         self.index = None
         self.response_texts = []
         self.response_metadata = []
-        self._build_index()
+        if not self._load_cached_index():
+            self._build_index()
     
     def _load_responses(self) -> list:
         """Загружает шаблоны ответов из JSON файла"""
@@ -93,7 +101,7 @@ class AutoReplyService:
             raise ValueError("Не найдено ни одного шаблона ответа!")
         
         self.response_texts = texts
-        
+
         # Генерация эмбеддингов для всех шаблонов
         print(f"Генерация эмбеддингов для {len(texts)} шаблонов...")
         embeddings = self.model.encode(texts, show_progress_bar=True, batch_size=32)
@@ -108,8 +116,19 @@ class AutoReplyService:
         # Добавление эмбеддингов в индекс
         self.index.add(embeddings.astype('float32'))
         self.response_metadata = metadata
-        
+
         print(f"✅ FAISS индекс создан: {self.index.ntotal} векторов, размерность {dimension}")
+
+        # Сохраняем индекс и метаданные для ускорения следующих запусков
+        os.makedirs(os.path.dirname(self.index_path), exist_ok=True)
+        faiss.write_index(self.index, self.index_path)
+        with open(self.metadata_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "responses_hash": self._responses_hash(),
+                "response_texts": self.response_texts,
+                "response_metadata": self.response_metadata
+            }, f, ensure_ascii=False, indent=2)
+        print(f"💾 Индекс и метаданные сохранены в {self.index_path} и {self.metadata_path}")
     
     def _detect_language(self, text: str) -> str:
         """
@@ -297,3 +316,34 @@ if __name__ == "__main__":
             if result.get('similarity', 0) > 0:
                 print(f"   (Лучшая схожесть: {result['similarity']:.3f})")
 
+    def _responses_hash(self) -> str:
+        """Возвращает контрольную сумму файла с шаблонами ответов"""
+        hasher = hashlib.md5()
+        with open(self.responses_path, "rb") as f:
+            for chunk in iter(lambda: f.read(4096), b""):
+                hasher.update(chunk)
+        return hasher.hexdigest()
+
+    def _load_cached_index(self) -> bool:
+        """
+        Пытается загрузить сохраненный FAISS индекс и метаданные, если они
+        соответствуют текущему файлу ответов.
+        """
+        if not (os.path.exists(self.index_path) and os.path.exists(self.metadata_path)):
+            return False
+
+        try:
+            with open(self.metadata_path, "r", encoding="utf-8") as f:
+                metadata = json.load(f)
+
+            if metadata.get("responses_hash") != self._responses_hash():
+                return False
+
+            self.response_texts = metadata.get("response_texts", [])
+            self.response_metadata = metadata.get("response_metadata", [])
+            self.index = faiss.read_index(self.index_path)
+            print(f"✅ Загружен кешированный FAISS индекс из {self.index_path}")
+            return True
+        except Exception as exc:  # pragma: no cover - защитный блок
+            print(f"⚠️  Не удалось загрузить кешированный индекс: {exc}")
+            return False

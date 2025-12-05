@@ -4,7 +4,7 @@ FastAPI сервис для ML классификации и автоответ�
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional, Dict
+from typing import Optional, Dict, List
 import os
 import sys
 
@@ -14,6 +14,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from sentence_transformers import SentenceTransformer
 import joblib
 from auto_reply import AutoReplyService
+from improved_auto_reply import ImprovedAutoReplyService
 
 app = FastAPI(
     title="Help Desk ML Service",
@@ -27,6 +28,7 @@ classifier_priority = None
 classifier_problem_type = None
 embedding_model = None
 auto_reply_service = None
+improved_auto_reply_service = None  # Улучшенный сервис с LLM
 
 
 class TicketRequest(BaseModel):
@@ -42,6 +44,7 @@ class AutoReplyRequest(BaseModel):
     category: Optional[str] = None
     problem_type: Optional[str] = None
     language: Optional[str] = None
+    conversation_history: Optional[List[Dict]] = None  # История диалога для контекста
 
 
 class PredictionResponse(BaseModel):
@@ -59,11 +62,13 @@ class AutoReplyResponse(BaseModel):
     response_id: Optional[str] = None
     similarity: Optional[float] = None
     reason: Optional[str] = None
+    category: Optional[str] = None
+    language: Optional[str] = None
 
 
 def load_models():
     """Загружает все обученные модели"""
-    global classifier_category, classifier_priority, classifier_problem_type, embedding_model, auto_reply_service
+    global classifier_category, classifier_priority, classifier_problem_type, embedding_model, auto_reply_service, improved_auto_reply_service
     
     models_dir = "models"
     
@@ -106,7 +111,7 @@ def load_models():
     
     print("   ✅ Все классификаторы загружены")
     
-    # Инициализация сервиса автоответа
+    # Инициализация сервиса автоответа (старый, для совместимости)
     print("\n3. Инициализация сервиса автоответа...")
     responses_path = "responses.json"
     if not os.path.exists(responses_path):
@@ -122,6 +127,23 @@ def load_models():
         except Exception as e:
             print(f"   ⚠️  Ошибка инициализации автоответа: {e}")
             auto_reply_service = None
+    
+    # Инициализация улучшенного сервиса автоответа с LLM
+    print("\n4. Инициализация улучшенного сервиса автоответа (LLM)...")
+    if not os.path.exists(responses_path):
+        print(f"   ⚠️  Файл {responses_path} не найден, улучшенный автоответ будет недоступен")
+        improved_auto_reply_service = None
+    else:
+        try:
+            improved_auto_reply_service = ImprovedAutoReplyService(
+                responses_path=responses_path,
+                model_path=embedding_model_path if os.path.exists(embedding_model_path) else None,
+                similarity_threshold=0.50  # Понижен для лучшей работы с казахским языком
+            )
+            print("   ✅ Улучшенный сервис автоответа инициализирован")
+        except Exception as e:
+            print(f"   ⚠️  Ошибка инициализации улучшенного автоответа: {e}")
+            improved_auto_reply_service = None
     
     print("\n" + "=" * 60)
     print("ВСЕ МОДЕЛИ ЗАГРУЖЕНЫ!")
@@ -143,6 +165,8 @@ async def root():
         "endpoints": {
             "/predict": "Классификация тикета (POST)",
             "/auto_reply": "Автоматический ответ (POST)",
+            "/predict_and_reply": "Классификация + автоответ (POST)",
+            "/summarize_conversation": "Резюмирование диалога (POST)",
             "/health": "Проверка работоспособности (GET)",
             "/docs": "Документация API (Swagger UI)"
         }
@@ -162,7 +186,9 @@ async def health_check():
     return {
         "status": "healthy" if models_loaded else "degraded",
         "models_loaded": models_loaded,
-        "auto_reply_available": auto_reply_service is not None
+        "auto_reply_available": auto_reply_service is not None,
+        "improved_auto_reply_available": improved_auto_reply_service is not None,
+        "using_improved_service": improved_auto_reply_service is not None
     }
 
 
@@ -230,6 +256,7 @@ async def predict_ticket(request: TicketRequest):
 async def get_auto_reply(request: AutoReplyRequest):
     """
     Получает автоматический ответ для тикета
+    Использует улучшенный сервис с LLM генерацией (если доступен)
     
     Args:
         request: Запрос с текстом тикета и опциональными полями
@@ -237,8 +264,14 @@ async def get_auto_reply(request: AutoReplyRequest):
     Returns:
         Автоматический ответ или причина отказа
     """
-    if auto_reply_service is None:
-        raise HTTPException(status_code=503, detail="Сервис автоответа недоступен!")
+    # Всегда используем улучшенный сервис, если доступен
+    if improved_auto_reply_service is None:
+        if auto_reply_service is None:
+            raise HTTPException(status_code=503, detail="Сервис автоответа недоступен!")
+        # Fallback на старый сервис
+        service = auto_reply_service
+    else:
+        service = improved_auto_reply_service
     
     try:
         if not request.text:
@@ -255,13 +288,22 @@ async def get_auto_reply(request: AutoReplyRequest):
         else:
             problem_type = request.problem_type
         
-        # Получение автоответа
-        result = auto_reply_service.get_auto_reply(
-            query=request.text,
-            problem_type=problem_type,
-            category=request.category,
-            language=request.language
-        )
+        # Получение автоответа (используем улучшенный метод, если доступен)
+        if improved_auto_reply_service is not None:
+            result = improved_auto_reply_service.generate_draft_reply(
+                query=request.text,
+                category=request.category,
+                problem_type=problem_type,
+                language=request.language,
+                conversation_history=request.conversation_history
+            )
+        else:
+            result = auto_reply_service.get_auto_reply(
+                query=request.text,
+                problem_type=problem_type,
+                category=request.category,
+                language=request.language
+            )
         
         return AutoReplyResponse(**result)
     
@@ -285,7 +327,8 @@ async def predict_and_reply(request: TicketRequest):
     
     # Попытка автоответа
     auto_reply_result = None
-    if auto_reply_service is not None:
+    service = improved_auto_reply_service if improved_auto_reply_service is not None else auto_reply_service
+    if service is not None:
         try:
             auto_reply_result = await get_auto_reply(AutoReplyRequest(
                 text=request.text,
@@ -300,6 +343,46 @@ async def predict_and_reply(request: TicketRequest):
         "prediction": prediction.dict(),
         "auto_reply": auto_reply_result.dict() if auto_reply_result else None
     }
+
+
+class SummarizeRequest(BaseModel):
+    """Модель запроса для резюмирования диалога"""
+    messages: List[Dict]  # Список сообщений диалога
+    language: Optional[str] = None
+
+
+class SummarizeResponse(BaseModel):
+    """Модель ответа резюмирования"""
+    summary: str
+    language: str
+
+
+@app.post("/summarize_conversation", response_model=SummarizeResponse)
+async def summarize_conversation(request: SummarizeRequest):
+    """
+    Резюмирует диалог для передачи специалисту
+    Согласно imporvemnt.md: резюмирование диалогов через LLM
+    """
+    if improved_auto_reply_service is None:
+        raise HTTPException(status_code=503, detail="Улучшенный сервис автоответа недоступен!")
+    
+    try:
+        if not request.messages:
+            raise HTTPException(status_code=400, detail="Список сообщений не может быть пустым!")
+        
+        summary = improved_auto_reply_service.summarize_conversation(
+            messages=request.messages,
+            language=request.language
+        )
+        
+        language = request.language or improved_auto_reply_service._detect_language(
+            request.messages[0].get('text', '')
+        )
+        
+        return SummarizeResponse(summary=summary, language=language)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка резюмирования: {str(e)}")
 
 
 if __name__ == "__main__":

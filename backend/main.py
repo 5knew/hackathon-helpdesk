@@ -80,9 +80,70 @@ def init_db():
             category TEXT NOT NULL,
             status TEXT NOT NULL,
             ml_classification TEXT,
-            queue TEXT
+            queue TEXT,
+            problem_type TEXT,
+            confidence REAL,
+            needs_clarification INTEGER DEFAULT 0,
+            confidence_warning TEXT,
+            subject TEXT,
+            sla_deadline TIMESTAMP,
+            sla_status TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            closed_at TIMESTAMP
         )
     """)
+    
+    # Comments table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS comments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            comment_text TEXT NOT NULL,
+            is_auto_reply INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (ticket_id) REFERENCES tickets(id)
+        )
+    """)
+    
+    # Ticket history (audit log)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS ticket_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER NOT NULL,
+            action TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            changed_by TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (ticket_id) REFERENCES tickets(id)
+        )
+    """)
+    
+    # Feedback (CSAT)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS feedback (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_id INTEGER NOT NULL,
+            rating INTEGER NOT NULL,
+            comment TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (ticket_id) REFERENCES tickets(id)
+        )
+    """)
+    
+    # Templates
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS templates (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            category TEXT,
+            content TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
     conn.commit()
     conn.close()
 
@@ -354,38 +415,50 @@ def submit_ticket(ticket: Ticket):
         """)
         
         # Добавляем новые колонки, если их нет (миграция)
-        try:
-            cursor.execute("ALTER TABLE tickets ADD COLUMN problem_type TEXT")
-        except sqlite3.OperationalError:
-            pass  # Колонка уже существует
+        migrations = [
+            "ALTER TABLE tickets ADD COLUMN problem_type TEXT",
+            "ALTER TABLE tickets ADD COLUMN confidence REAL",
+            "ALTER TABLE tickets ADD COLUMN needs_clarification INTEGER DEFAULT 0",
+            "ALTER TABLE tickets ADD COLUMN confidence_warning TEXT",
+            "ALTER TABLE tickets ADD COLUMN subject TEXT",
+            "ALTER TABLE tickets ADD COLUMN sla_deadline TIMESTAMP",
+            "ALTER TABLE tickets ADD COLUMN sla_status TEXT",
+            "ALTER TABLE tickets ADD COLUMN created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "ALTER TABLE tickets ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP",
+            "ALTER TABLE tickets ADD COLUMN closed_at TIMESTAMP"
+        ]
         
-        try:
-            cursor.execute("ALTER TABLE tickets ADD COLUMN confidence REAL")
-        except sqlite3.OperationalError:
-            pass  # Колонка уже существует
-        
-        try:
-            cursor.execute("ALTER TABLE tickets ADD COLUMN needs_clarification INTEGER DEFAULT 0")
-        except sqlite3.OperationalError:
-            pass  # Колонка уже существует
-        
-        try:
-            cursor.execute("ALTER TABLE tickets ADD COLUMN confidence_warning TEXT")
-        except sqlite3.OperationalError:
-            pass  # Колонка уже существует
+        for migration in migrations:
+            try:
+                cursor.execute(migration)
+            except sqlite3.OperationalError:
+                pass  # Колонка уже существует
         
         # Получаем значение уверенности
         confidence_value = confidence.get("problem_type", 0.0) if isinstance(confidence, dict) else 0.0
         
+        # Calculate SLA deadline
+        created_at = datetime.now()
+        sla_deadline = calculate_sla_deadline(priority, created_at)
+        sla_status = check_sla_status(sla_deadline, status)
+        
         cursor.execute(
             """INSERT INTO tickets 
-               (user_id, problem_description, priority, category, status, ml_classification, problem_type, queue, confidence, needs_clarification, confidence_warning) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (user_id, problem_description, priority, category, status, ml_classification, problem_type, queue, confidence, needs_clarification, confidence_warning, subject, sla_deadline, sla_status) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (ticket.user_id, ticket.problem_description, priority, category, status, 
              f"{category}|{priority}|{problem_type}", problem_type, queue, 
-             confidence_value, 1 if needs_clarification else 0, confidence_warning)
+             confidence_value, 1 if needs_clarification else 0, confidence_warning, ticket.subject or "",
+             sla_deadline, sla_status)
         )
         ticket_id = cursor.lastrowid
+        
+        # Log ticket creation in history
+        cursor.execute("""
+            INSERT INTO ticket_history (ticket_id, action, new_value)
+            VALUES (?, ?, ?)
+        """, (ticket_id, "ticket_created", f"Status: {status}, Queue: {queue}"))
+        
         conn.commit()
         conn.close()
 
@@ -611,3 +684,613 @@ def summarize_ticket(request: SummarizeRequest):
         print(traceback.format_exc())
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"Ошибка при резюмировании: {str(e)}")
+
+# --- New Models for Extended Functionality ---
+
+class TicketDetail(BaseModel):
+    id: int
+    user_id: str
+    problem_description: str
+    priority: str
+    category: str
+    status: str
+    queue: str
+    problem_type: Optional[str] = None
+    confidence: Optional[float] = None
+    needs_clarification: bool = False
+    confidence_warning: Optional[str] = None
+    subject: Optional[str] = None
+    sla_deadline: Optional[str] = None
+    sla_status: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    closed_at: Optional[str] = None
+
+class TicketListResponse(BaseModel):
+    tickets: List[TicketDetail]
+    total: int
+    limit: int
+    offset: int
+
+class CommentRequest(BaseModel):
+    comment_text: str
+    is_auto_reply: bool = False
+
+class CommentResponse(BaseModel):
+    id: int
+    ticket_id: int
+    user_id: str
+    comment_text: str
+    is_auto_reply: bool
+    created_at: str
+
+class TicketUpdateRequest(BaseModel):
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    category: Optional[str] = None
+    queue: Optional[str] = None
+    comment: Optional[str] = None
+
+class FeedbackRequest(BaseModel):
+    rating: int  # 1-5
+    comment: Optional[str] = None
+
+class FeedbackResponse(BaseModel):
+    id: int
+    ticket_id: int
+    rating: int
+    comment: Optional[str] = None
+    created_at: str
+
+class TemplateRequest(BaseModel):
+    name: str
+    category: Optional[str] = None
+    content: str
+
+class TemplateResponse(BaseModel):
+    id: int
+    name: str
+    category: Optional[str] = None
+    content: str
+    created_at: str
+
+class SearchResponse(BaseModel):
+    tickets: List[TicketDetail]
+    total: int
+    query: str
+
+# SLA calculation helper
+def calculate_sla_deadline(priority: str, created_at: datetime) -> datetime:
+    """Calculate SLA deadline based on priority"""
+    sla_hours = {
+        "Высокий": 4,  # 4 hours
+        "Средний": 24,  # 24 hours
+        "Низкий": 72  # 72 hours
+    }
+    hours = sla_hours.get(priority, 24)
+    return created_at + timedelta(hours=hours)
+
+def check_sla_status(sla_deadline: datetime, status: str) -> str:
+    """Check if ticket is within SLA"""
+    if status == "Closed":
+        return "met"
+    if datetime.now() > sla_deadline:
+        return "overdue"
+    if (sla_deadline - datetime.now()).total_seconds() < 3600:  # Less than 1 hour
+        return "warning"
+    return "ok"
+
+# --- New API Endpoints ---
+
+@app.get("/tickets", response_model=TicketListResponse)
+def get_tickets(
+    user_id: Optional[str] = None,
+    status: Optional[str] = None,
+    category: Optional[str] = None,
+    queue: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0
+):
+    """Get list of tickets with filtering and pagination"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        query = "SELECT * FROM tickets WHERE 1=1"
+        params = []
+        
+        if user_id:
+            query += " AND user_id = ?"
+            params.append(user_id)
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if category:
+            query += " AND category = ?"
+            params.append(category)
+        if queue:
+            query += " AND queue = ?"
+            params.append(queue)
+        
+        # Get total count
+        count_query = query.replace("SELECT *", "SELECT COUNT(*)")
+        total = cursor.execute(count_query, params).fetchone()[0]
+        
+        # Get paginated results
+        query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        
+        rows = cursor.execute(query, params).fetchall()
+        
+        tickets = []
+        for row in rows:
+            ticket_dict = dict(row)
+            # Convert timestamps to strings
+            for key in ['created_at', 'updated_at', 'closed_at', 'sla_deadline']:
+                if ticket_dict.get(key):
+                    ticket_dict[key] = str(ticket_dict[key])
+            tickets.append(TicketDetail(**ticket_dict))
+        
+        return TicketListResponse(
+            tickets=tickets,
+            total=total,
+            limit=limit,
+            offset=offset
+        )
+    finally:
+        conn.close()
+
+@app.get("/tickets/{ticket_id}", response_model=TicketDetail)
+def get_ticket(ticket_id: int):
+    """Get detailed information about a ticket"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        row = cursor.execute(
+            "SELECT * FROM tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+        
+        if not row:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found")
+        
+        ticket_dict = dict(row)
+        # Convert timestamps to strings
+        for key in ['created_at', 'updated_at', 'closed_at', 'sla_deadline']:
+            if ticket_dict.get(key):
+                ticket_dict[key] = str(ticket_dict[key])
+        
+        return TicketDetail(**ticket_dict)
+    finally:
+        conn.close()
+
+@app.put("/tickets/{ticket_id}")
+def update_ticket(ticket_id: int, update: TicketUpdateRequest):
+    """Update ticket status and other fields"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        # Get current ticket
+        ticket = cursor.execute(
+            "SELECT * FROM tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+        
+        if not ticket:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found")
+        
+        # Build update query
+        updates = []
+        params = []
+        
+        if update.status:
+            updates.append("status = ?")
+            params.append(update.status)
+            # Log status change
+            cursor.execute("""
+                INSERT INTO ticket_history (ticket_id, action, old_value, new_value)
+                VALUES (?, ?, ?, ?)
+            """, (ticket_id, "status_change", ticket[4], update.status))
+            
+            # If closing, set closed_at
+            if update.status == "Closed":
+                updates.append("closed_at = CURRENT_TIMESTAMP")
+        
+        if update.priority:
+            updates.append("priority = ?")
+            params.append(update.priority)
+            cursor.execute("""
+                INSERT INTO ticket_history (ticket_id, action, old_value, new_value)
+                VALUES (?, ?, ?, ?)
+            """, (ticket_id, "priority_change", ticket[3], update.priority))
+        
+        if update.category:
+            updates.append("category = ?")
+            params.append(update.category)
+            cursor.execute("""
+                INSERT INTO ticket_history (ticket_id, action, old_value, new_value)
+                VALUES (?, ?, ?, ?)
+            """, (ticket_id, "category_change", ticket[5], update.category))
+        
+        if update.queue:
+            updates.append("queue = ?")
+            params.append(update.queue)
+        
+        if updates:
+            updates.append("updated_at = CURRENT_TIMESTAMP")
+            params.append(ticket_id)
+            query = f"UPDATE tickets SET {', '.join(updates)} WHERE id = ?"
+            cursor.execute(query, params)
+        
+        # Add comment if provided
+        if update.comment:
+            cursor.execute("""
+                INSERT INTO comments (ticket_id, user_id, comment_text, is_auto_reply)
+                VALUES (?, ?, ?, 0)
+            """, (ticket_id, "operator", update.comment))
+            cursor.execute("""
+                INSERT INTO ticket_history (ticket_id, action, new_value)
+                VALUES (?, ?, ?)
+            """, (ticket_id, "comment_added", update.comment))
+        
+        conn.commit()
+        
+        # Return updated ticket
+        updated = cursor.execute(
+            "SELECT * FROM tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+        
+        ticket_dict = dict(updated)
+        for key in ['created_at', 'updated_at', 'closed_at', 'sla_deadline']:
+            if ticket_dict.get(key):
+                ticket_dict[key] = str(ticket_dict[key])
+        
+        return TicketDetail(**ticket_dict)
+    finally:
+        conn.close()
+
+@app.post("/tickets/{ticket_id}/comments", response_model=CommentResponse)
+def add_comment(ticket_id: int, comment: CommentRequest):
+    """Add a comment to a ticket"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        # Check if ticket exists
+        ticket = cursor.execute(
+            "SELECT id FROM tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+        
+        if not ticket:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found")
+        
+        # Insert comment
+        cursor.execute("""
+            INSERT INTO comments (ticket_id, user_id, comment_text, is_auto_reply)
+            VALUES (?, ?, ?, ?)
+        """, (ticket_id, "user", comment.comment_text, 1 if comment.is_auto_reply else 0))
+        
+        comment_id = cursor.lastrowid
+        
+        # Log in history
+        cursor.execute("""
+            INSERT INTO ticket_history (ticket_id, action, new_value)
+            VALUES (?, ?, ?)
+        """, (ticket_id, "comment_added", comment.comment_text))
+        
+        conn.commit()
+        
+        # Return comment
+        row = cursor.execute(
+            "SELECT * FROM comments WHERE id = ?", (comment_id,)
+        ).fetchone()
+        
+        return CommentResponse(
+            id=row[0],
+            ticket_id=row[1],
+            user_id=row[2],
+            comment_text=row[3],
+            is_auto_reply=bool(row[4]),
+            created_at=str(row[5])
+        )
+    finally:
+        conn.close()
+
+@app.get("/tickets/{ticket_id}/comments", response_model=List[CommentResponse])
+def get_comments(ticket_id: int):
+    """Get all comments for a ticket"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        rows = cursor.execute(
+            "SELECT * FROM comments WHERE ticket_id = ? ORDER BY created_at ASC",
+            (ticket_id,)
+        ).fetchall()
+        
+        return [
+            CommentResponse(
+                id=row['id'],
+                ticket_id=row['ticket_id'],
+                user_id=row['user_id'],
+                comment_text=row['comment_text'],
+                is_auto_reply=bool(row['is_auto_reply']),
+                created_at=str(row['created_at'])
+            )
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+@app.get("/tickets/search", response_model=SearchResponse)
+def search_tickets(q: str, limit: int = 50, offset: int = 0):
+    """Search tickets by text"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        search_term = f"%{q}%"
+        query = """
+            SELECT * FROM tickets 
+            WHERE problem_description LIKE ? 
+               OR subject LIKE ?
+               OR category LIKE ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        """
+        
+        rows = cursor.execute(
+            query, (search_term, search_term, search_term, limit, offset)
+        ).fetchall()
+        
+        # Get total count
+        count_query = """
+            SELECT COUNT(*) FROM tickets 
+            WHERE problem_description LIKE ? 
+               OR subject LIKE ?
+               OR category LIKE ?
+        """
+        total = cursor.execute(count_query, (search_term, search_term, search_term)).fetchone()[0]
+        
+        tickets = []
+        for row in rows:
+            ticket_dict = dict(row)
+            for key in ['created_at', 'updated_at', 'closed_at', 'sla_deadline']:
+                if ticket_dict.get(key):
+                    ticket_dict[key] = str(ticket_dict[key])
+            tickets.append(TicketDetail(**ticket_dict))
+        
+        return SearchResponse(tickets=tickets, total=total, query=q)
+    finally:
+        conn.close()
+
+@app.get("/tickets/overdue", response_model=List[TicketDetail])
+def get_overdue_tickets():
+    """Get tickets that exceeded SLA"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        rows = cursor.execute("""
+            SELECT * FROM tickets 
+            WHERE sla_status = 'overdue' OR (sla_deadline < datetime('now') AND status != 'Closed')
+            ORDER BY sla_deadline ASC
+        """).fetchall()
+        
+        tickets = []
+        for row in rows:
+            ticket_dict = dict(row)
+            for key in ['created_at', 'updated_at', 'closed_at', 'sla_deadline']:
+                if ticket_dict.get(key):
+                    ticket_dict[key] = str(ticket_dict[key])
+            tickets.append(TicketDetail(**ticket_dict))
+        
+        return tickets
+    finally:
+        conn.close()
+
+@app.post("/tickets/{ticket_id}/feedback", response_model=FeedbackResponse)
+def submit_feedback(ticket_id: int, feedback: FeedbackRequest):
+    """Submit CSAT feedback for a ticket"""
+    if feedback.rating < 1 or feedback.rating > 5:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail="Rating must be between 1 and 5")
+    
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        # Check if ticket exists
+        ticket = cursor.execute(
+            "SELECT id FROM tickets WHERE id = ?", (ticket_id,)
+        ).fetchone()
+        
+        if not ticket:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found")
+        
+        # Insert feedback
+        cursor.execute("""
+            INSERT INTO feedback (ticket_id, rating, comment)
+            VALUES (?, ?, ?)
+        """, (ticket_id, feedback.rating, feedback.comment))
+        
+        feedback_id = cursor.lastrowid
+        conn.commit()
+        
+        # Return feedback
+        row = cursor.execute(
+            "SELECT * FROM feedback WHERE id = ?", (feedback_id,)
+        ).fetchone()
+        
+        return FeedbackResponse(
+            id=row[0],
+            ticket_id=row[1],
+            rating=row[2],
+            comment=row[3],
+            created_at=str(row[4])
+        )
+    finally:
+        conn.close()
+
+@app.get("/templates", response_model=List[TemplateResponse])
+def get_templates(category: Optional[str] = None):
+    """Get response templates"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        if category:
+            rows = cursor.execute(
+                "SELECT * FROM templates WHERE category = ? ORDER BY name",
+                (category,)
+            ).fetchall()
+        else:
+            rows = cursor.execute(
+                "SELECT * FROM templates ORDER BY name"
+            ).fetchall()
+        
+        return [
+            TemplateResponse(
+                id=row['id'],
+                name=row['name'],
+                category=row['category'],
+                content=row['content'],
+                created_at=str(row['created_at'])
+            )
+            for row in rows
+        ]
+    finally:
+        conn.close()
+
+@app.post("/templates", response_model=TemplateResponse)
+def create_template(template: TemplateRequest):
+    """Create a new response template"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute("""
+            INSERT INTO templates (name, category, content)
+            VALUES (?, ?, ?)
+        """, (template.name, template.category, template.content))
+        
+        template_id = cursor.lastrowid
+        conn.commit()
+        
+        row = cursor.execute(
+            "SELECT * FROM templates WHERE id = ?", (template_id,)
+        ).fetchone()
+        
+        return TemplateResponse(
+            id=row[0],
+            name=row[1],
+            category=row[2],
+            content=row[3],
+            created_at=str(row[4])
+        )
+    finally:
+        conn.close()
+
+@app.get("/analytics/performance")
+def get_performance_analytics():
+    """Get performance analytics"""
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        # Average resolution time
+        avg_resolution = cursor.execute("""
+            SELECT AVG((julianday(closed_at) - julianday(created_at)) * 24) as avg_hours
+            FROM tickets WHERE status = 'Closed' AND closed_at IS NOT NULL
+        """).fetchone()[0] or 0.0
+        
+        # SLA compliance
+        total_with_sla = cursor.execute("""
+            SELECT COUNT(*) FROM tickets WHERE sla_deadline IS NOT NULL
+        """).fetchone()[0]
+        
+        met_sla = cursor.execute("""
+            SELECT COUNT(*) FROM tickets 
+            WHERE sla_status = 'met' OR (status = 'Closed' AND closed_at <= sla_deadline)
+        """).fetchone()[0]
+        
+        sla_compliance = (met_sla / total_with_sla * 100) if total_with_sla > 0 else 0.0
+        
+        # Peak hours (hour with most tickets)
+        peak_hour = cursor.execute("""
+            SELECT strftime('%H', created_at) as hour, COUNT(*) as count
+            FROM tickets
+            GROUP BY hour
+            ORDER BY count DESC
+            LIMIT 1
+        """).fetchone()
+        
+        return {
+            "avg_resolution_time_hours": round(float(avg_resolution), 2),
+            "sla_compliance_percent": round(sla_compliance, 2),
+            "peak_hour": peak_hour[0] if peak_hour else None,
+            "tickets_in_peak_hour": peak_hour[1] if peak_hour else 0
+        }
+    finally:
+        conn.close()
+
+@app.get("/export/metrics")
+def export_metrics(format: str = "json", date_from: Optional[str] = None):
+    """Export metrics in CSV or JSON format"""
+    from fastapi.responses import JSONResponse, Response
+    import csv
+    import io
+    
+    db_path = os.path.join(os.path.dirname(__file__), DB_NAME)
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    try:
+        query = "SELECT * FROM tickets"
+        params = []
+        
+        if date_from:
+            query += " WHERE created_at >= ?"
+            params.append(date_from)
+        
+        rows = cursor.execute(query, params).fetchall()
+        
+        if format.lower() == "csv":
+            output = io.StringIO()
+            writer = csv.DictWriter(output, fieldnames=[col[0] for col in cursor.description])
+            writer.writeheader()
+            for row in rows:
+                writer.writerow(dict(row))
+            
+            return Response(
+                content=output.getvalue(),
+                media_type="text/csv",
+                headers={"Content-Disposition": "attachment; filename=metrics.csv"}
+            )
+        else:
+            return JSONResponse(content=[dict(row) for row in rows])
+    finally:
+        conn.close()

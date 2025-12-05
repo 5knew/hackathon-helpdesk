@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Dict
+from typing import Dict, Optional
 import sqlite3
 import requests
 import os
@@ -29,6 +29,8 @@ class TicketResponse(BaseModel):
     status: str
     message: str
     queue: str
+    needs_clarification: bool = False  # Требуется уточнение при низкой уверенности
+    confidence_warning: Optional[str] = None  # Предупреждение о низкой уверенности
 
 class MetricsResponse(BaseModel):
     total_tickets: int
@@ -141,11 +143,38 @@ def submit_ticket(ticket: Ticket):
         priority = ml_result["priority"]
         problem_type = ml_result["problem_type"]
         confidence = ml_result.get("confidence", {})
+        
+        # 1.5. Валидация уверенности модели (если confidence < 0.7, требуется уточнение)
+        CONFIDENCE_THRESHOLD = 0.7
+        needs_clarification = False
+        confidence_warning = None
+        
+        category_conf = confidence.get("category", 0.0)
+        priority_conf = confidence.get("priority", 0.0)
+        problem_type_conf = confidence.get("problem_type", 0.0)
+        
+        # Проверяем уверенность по каждому параметру
+        low_confidence_fields = []
+        if category_conf < CONFIDENCE_THRESHOLD:
+            low_confidence_fields.append(f"категория ({category_conf:.1%})")
+        if priority_conf < CONFIDENCE_THRESHOLD:
+            low_confidence_fields.append(f"приоритет ({priority_conf:.1%})")
+        if problem_type_conf < CONFIDENCE_THRESHOLD:
+            low_confidence_fields.append(f"тип проблемы ({problem_type_conf:.1%})")
+        
+        if low_confidence_fields:
+            needs_clarification = True
+            confidence_warning = f"Низкая уверенность модели по: {', '.join(low_confidence_fields)}. Требуется ручная проверка."
 
         # 2. Routing Logic согласно ТЗ
         status = "Pending"
         message = "Заявка принята в обработку."
         queue = "General"
+        
+        # Если требуется уточнение, отправляем в специальную очередь
+        if needs_clarification:
+            queue = "ManualReview"
+            message = f"Заявка требует уточнения. {confidence_warning} Категория: {category}, Приоритет: {priority}"
 
         # A. Проверка типа проблемы (Типовой = автоматическое решение)
         if problem_type == "Типовой":
@@ -200,6 +229,8 @@ def submit_ticket(ticket: Ticket):
                 problem_type TEXT,
                 queue TEXT,
                 confidence REAL,
+                needs_clarification INTEGER DEFAULT 0,
+                confidence_warning TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -215,22 +246,39 @@ def submit_ticket(ticket: Ticket):
         except sqlite3.OperationalError:
             pass  # Колонка уже существует
         
+        try:
+            cursor.execute("ALTER TABLE tickets ADD COLUMN needs_clarification INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Колонка уже существует
+        
+        try:
+            cursor.execute("ALTER TABLE tickets ADD COLUMN confidence_warning TEXT")
+        except sqlite3.OperationalError:
+            pass  # Колонка уже существует
+        
         # Получаем значение уверенности
         confidence_value = confidence.get("problem_type", 0.0) if isinstance(confidence, dict) else 0.0
         
         cursor.execute(
             """INSERT INTO tickets 
-               (user_id, problem_description, priority, category, status, ml_classification, problem_type, queue, confidence) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (user_id, problem_description, priority, category, status, ml_classification, problem_type, queue, confidence, needs_clarification, confidence_warning) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (ticket.user_id, ticket.problem_description, priority, category, status, 
              f"{category}|{priority}|{problem_type}", problem_type, queue, 
-             confidence_value)
+             confidence_value, 1 if needs_clarification else 0, confidence_warning)
         )
         ticket_id = cursor.lastrowid
         conn.commit()
         conn.close()
 
-        return TicketResponse(ticket_id=ticket_id, status=status, message=message, queue=queue)
+        return TicketResponse(
+            ticket_id=ticket_id, 
+            status=status, 
+            message=message, 
+            queue=queue,
+            needs_clarification=needs_clarification,
+            confidence_warning=confidence_warning
+        )
     except Exception as e:
         import traceback
         print(f"Error in submit_ticket: {e}")
@@ -278,6 +326,13 @@ def get_metrics():
         # Процент автоматических решений
         auto_rate = (auto_closed / total_tickets * 100) if total_tickets > 0 else 0.0
         
+        # Метрики валидации уверенности
+        tickets_needing_clarification = cursor.execute(
+            "SELECT COUNT(*) FROM tickets WHERE needs_clarification = 1"
+        ).fetchone()[0] or 0
+        
+        clarification_rate = (tickets_needing_clarification / total_tickets * 100) if total_tickets > 0 else 0.0
+        
     except sqlite3.OperationalError:
          # Return zero values if DB is empty or not init
          return {
@@ -302,7 +357,9 @@ def get_metrics():
         "tickets_by_queue": {row['queue']: row['count'] for row in queues},
         "tickets_by_problem_type": {row['problem_type']: row['count'] for row in problem_types},
         "accuracy_metrics": {
-            "avg_confidence": round(float(avg_confidence) * 100, 2) if avg_confidence else 0.0
+            "avg_confidence": round(float(avg_confidence) * 100, 2) if avg_confidence else 0.0,
+            "tickets_needing_clarification": tickets_needing_clarification,
+            "clarification_rate": round(clarification_rate, 2)
         },
         "auto_resolution_rate": round(auto_rate, 2),
         "avg_response_time": 0.8  # Имитация времени ответа (в секундах)

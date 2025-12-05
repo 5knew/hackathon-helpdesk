@@ -269,42 +269,63 @@ def submit_ticket(ticket: Ticket):
             queue = "ManualReview"
             message = f"Заявка требует уточнения. {confidence_warning} Категория: {category}, Приоритет: {priority}"
 
+        # Улучшенная логика маршрутизации с учетом confidence scores
         # A. Проверка типа проблемы (Типовой = автоматическое решение)
-        if problem_type == "Типовой":
-            # Автоматическое решение типовых инцидентов (~50% заявок)
+        # Используем confidence по problem_type для более точного определения
+        if problem_type == "Типовой" and problem_type_conf >= 0.75:
+            # Высокая уверенность в типовом инциденте - автоматическое решение
             auto_reply = get_auto_reply_from_ml(ticket.problem_description, category, problem_type)
             if auto_reply:
                 status = "Closed"
                 queue = "Automated"
-                message = auto_reply + f" (Автоматически закрыто. Категория: {category})"
+                message = auto_reply + f" (Автоматически закрыто. Категория: {category}, Уверенность: {problem_type_conf:.1%})"
             else:
                 # Если не можем ответить автоматически, отправляем в общую очередь
                 status = "Pending"
                 queue = "GeneralSupport"
                 message = f"Заявка принята в обработку. Категория: {category}"
+        elif problem_type == "Типовой" and problem_type_conf < 0.75:
+            # Низкая уверенность в типовом инциденте - требует проверки
+            status = "Pending"
+            queue = "GeneralSupport"
+            message = f"Заявка принята. Возможно типовой случай (уверенность: {problem_type_conf:.1%}), требуется проверка. Категория: {category}"
         
         else:
             # B. Маршрутизация сложных кейсов в профильные департаменты
-            # Эскалация по приоритету
+            # Используем confidence для взвешенной маршрутизации
+            
+            # Эскалация по приоритету (с учетом confidence)
             if priority == "Высокий":
-                queue = "HighPriority"
-                message = f"Заявка эскалирована в отдел высокого приоритета. Категория: {category}"
-            # Маршрутизация по категории
-            elif "Биллинг" in category or "платеж" in category.lower():
-                queue = "Billing"
-                message = f"Заявка направлена в отдел биллинга. Приоритет: {priority}"
-            elif "Техническая" in category or "IT" in category:
-                queue = "TechSupport"
-                message = f"Заявка направлена в техническую поддержку. Приоритет: {priority}"
-            elif "HR" in category or "кадр" in category.lower():
-                queue = "HR"
-                message = f"Заявка направлена в HR отдел. Приоритет: {priority}"
-            elif "Клиентский" in category or "сервис" in category.lower():
-                queue = "CustomerService"
-                message = f"Заявка направлена в клиентский сервис. Приоритет: {priority}"
+                if priority_conf >= 0.7:
+                    queue = "HighPriority"
+                    message = f"Заявка эскалирована в отдел высокого приоритета. Категория: {category} (уверенность приоритета: {priority_conf:.1%})"
+                else:
+                    # Низкая уверенность в приоритете - отправляем в общую очередь с пометкой
+                    queue = "HighPriority"
+                    message = f"Заявка эскалирована (приоритет требует проверки, уверенность: {priority_conf:.1%}). Категория: {category}"
+            
+            # Маршрутизация по категории (с учетом confidence категории)
+            elif category_conf >= 0.7:
+                # Высокая уверенность в категории - используем для маршрутизации
+                if "Биллинг" in category or "платеж" in category.lower():
+                    queue = "Billing"
+                    message = f"Заявка направлена в отдел биллинга. Приоритет: {priority} (уверенность категории: {category_conf:.1%})"
+                elif "Техническая" in category or "IT" in category:
+                    queue = "TechSupport"
+                    message = f"Заявка направлена в техническую поддержку. Приоритет: {priority} (уверенность категории: {category_conf:.1%})"
+                elif "HR" in category or "кадр" in category.lower():
+                    queue = "HR"
+                    message = f"Заявка направлена в HR отдел. Приоритет: {priority} (уверенность категории: {category_conf:.1%})"
+                elif "Клиентский" in category or "сервис" in category.lower():
+                    queue = "CustomerService"
+                    message = f"Заявка направлена в клиентский сервис. Приоритет: {priority} (уверенность категории: {category_conf:.1%})"
+                else:
+                    queue = "GeneralSupport"
+                    message = f"Заявка направлена в общую поддержку. Категория: {category}, Приоритет: {priority} (уверенность категории: {category_conf:.1%})"
             else:
+                # Низкая уверенность в категории - отправляем в общую очередь для проверки
                 queue = "GeneralSupport"
-                message = f"Заявка направлена в общую поддержку. Категория: {category}, Приоритет: {priority}"
+                message = f"Заявка направлена в общую поддержку для проверки категории (уверенность: {category_conf:.1%}). Предполагаемая категория: {category}, Приоритет: {priority}"
 
         # 3. Save to Database
         conn = sqlite3.connect(db_path)

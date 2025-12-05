@@ -5,7 +5,7 @@ import { Chip } from '../components/Chip';
 import { Metrics, TicketResult } from '../types';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
-import { mockMetrics } from '../utils/metrics';
+import { fetchMetrics } from '../utils/metrics';
 import { submitTicketToAPI, ticketExamples } from '../utils/ticket';
 
 export const Dashboard: React.FC = () => {
@@ -66,10 +66,15 @@ export const Dashboard: React.FC = () => {
     setTicketText(example);
   };
 
-  const loadMetrics = () => {
-    const newMetrics = mockMetrics();
-    setMetrics(newMetrics);
-    showToast('Метрики обновлены', 'success');
+  const loadMetrics = async () => {
+    try {
+      const newMetrics = await fetchMetrics();
+      setMetrics(newMetrics);
+      showToast('Метрики обновлены', 'success');
+    } catch (error) {
+      console.error('Error loading metrics:', error);
+      showToast('Ошибка загрузки метрик', 'error');
+    }
   };
 
   const setMetricValue = (key: keyof Metrics, value: number) => {

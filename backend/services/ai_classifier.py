@@ -34,9 +34,12 @@ class AIClassifier:
             }
         """
         try:
+            # ML сервис (app.py) ожидает: {"text": str, "subject": Optional[str]}
+            # Объединяем subject и body в text
+            full_text = f"{subject or ''} {body}".strip()
             payload = {
-                "subject": subject or "Заявка",
-                "body": body
+                "text": full_text,
+                "subject": subject or ""
             }
             response = requests.post(
                 f"{self.ml_service_url}/predict",

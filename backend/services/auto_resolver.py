@@ -35,11 +35,18 @@ class AutoResolver:
             return None
         
         try:
+            # Маппинг IssueType enum в строки, которые ожидает ML сервис
+            problem_type_map = {
+                IssueType.AUTO_RESOLVABLE: "Типовой",
+                IssueType.SIMPLE: "Простой",
+                IssueType.COMPLEX: "Сложный"
+            }
+            
             payload = {"text": text}
             if category:
                 payload["category"] = category
             if issue_type:
-                payload["problem_type"] = issue_type.value
+                payload["problem_type"] = problem_type_map.get(issue_type, "Сложный")
             
             response = requests.post(
                 f"{self.ml_service_url}/auto_reply",
@@ -50,8 +57,9 @@ class AutoResolver:
             result = response.json()
             
             # Проверяем, может ли система ответить автоматически
-            if result.get("can_auto_reply", True):
-                return result.get("reply", None)
+            # ML сервис (app.py) возвращает response_text, а не reply
+            if result.get("can_auto_reply", False):
+                return result.get("response_text", None)
             else:
                 return None
         except requests.exceptions.RequestException as e:

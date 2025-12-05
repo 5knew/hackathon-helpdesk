@@ -42,6 +42,8 @@ class MetricsResponse(BaseModel):
     accuracy_metrics: Dict[str, float]
     auto_resolution_rate: float
     avg_response_time: float
+    routing_errors: Dict[str, int]  # Метрики ошибок маршрутизации
+    routing_error_rate: float  # Процент ошибок маршрутизации
 
 # --- Database Setup ---
 DB_NAME = "tickets.db"
@@ -333,6 +335,27 @@ def get_metrics():
         
         clarification_rate = (tickets_needing_clarification / total_tickets * 100) if total_tickets > 0 else 0.0
         
+        # Метрики ошибок маршрутизации
+        manual_review_tickets = cursor.execute(
+            "SELECT COUNT(*) FROM tickets WHERE queue = 'ManualReview'"
+        ).fetchone()[0] or 0
+        
+        low_confidence_tickets = cursor.execute(
+            "SELECT COUNT(*) FROM tickets WHERE confidence < 0.7 AND confidence IS NOT NULL"
+        ).fetchone()[0] or 0
+        
+        # Тикеты, которые были перемаршрутизированы (можно добавить поле reassigned в будущем)
+        # Пока считаем ошибками маршрутизации тикеты в ManualReview и с низкой уверенностью
+        routing_errors_count = manual_review_tickets  # Основной индикатор ошибок
+        
+        routing_error_rate = (routing_errors_count / total_tickets * 100) if total_tickets > 0 else 0.0
+        
+        routing_errors = {
+            "manual_review": manual_review_tickets,
+            "low_confidence": low_confidence_tickets,
+            "needs_clarification": tickets_needing_clarification
+        }
+        
     except sqlite3.OperationalError:
          # Return zero values if DB is empty or not init
          return {
@@ -344,7 +367,9 @@ def get_metrics():
             "tickets_by_problem_type": {},
             "accuracy_metrics": {"avg_confidence": 0.0},
             "auto_resolution_rate": 0.0,
-            "avg_response_time": 0.0
+            "avg_response_time": 0.0,
+            "routing_errors": {},
+            "routing_error_rate": 0.0
          }
     finally:
         conn.close()
@@ -362,5 +387,7 @@ def get_metrics():
             "clarification_rate": round(clarification_rate, 2)
         },
         "auto_resolution_rate": round(auto_rate, 2),
-        "avg_response_time": 0.8  # Имитация времени ответа (в секундах)
+        "avg_response_time": 0.8,  # Имитация времени ответа (в секундах)
+        "routing_errors": routing_errors,
+        "routing_error_rate": round(routing_error_rate, 2)
     }

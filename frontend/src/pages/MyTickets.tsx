@@ -27,7 +27,7 @@ export const MyTickets: React.FC = () => {
     }
     loadTickets();
     loadSavedSearches();
-  }, [navigate, filter]);
+  }, [navigate, filter, searchQuery]);
 
   useEffect(() => {
     // Автодополнение при вводе
@@ -70,30 +70,69 @@ export const MyTickets: React.FC = () => {
   const loadTickets = async () => {
     setLoading(true);
     try {
+      const statusMap: Record<string, 'new' | 'auto_resolved' | 'in_work' | 'waiting' | 'closed'> = {
+        'Open': 'new',
+        'In Progress': 'in_work',
+        'Pending': 'waiting',
+        'Closed': 'closed'
+      };
+      
+      const status = filter.status?.[0] ? statusMap[filter.status[0]] || undefined : undefined;
+      
+      // Форматируем даты для API (YYYY-MM-DD)
+      const dateFrom = filter.dateFrom ? filter.dateFrom : undefined;
+      const dateTo = filter.dateTo ? filter.dateTo : undefined;
+      
+      // Получаем category_id из названия категории (пока используем прямое имя, бэкенд будет искать по имени)
+      // TODO: Получать category_id через API категорий
+      const categoryName = filter.category?.[0];
+      
+      let tickets: Ticket[] = [];
+      
       if (searchQuery.trim()) {
-        // Используем поиск (старый метод, пока не реализован в новом API)
-        const searchResult = await searchTickets(searchQuery) as { tickets: Ticket[]; total: number; query: string };
-        setTickets(searchResult?.tickets || []);
+        // Используем поиск с фильтрами
+        const searchResult = await searchTickets(
+          searchQuery,
+          50,
+          0,
+          status,
+          categoryName, // Передаем имя категории, бэкенд найдет по имени
+          dateFrom,
+          dateTo
+        ) as any[];
+        
+        // Преобразуем результат поиска в формат Ticket
+        tickets = (searchResult || []).map((t: any) => ({
+          id: typeof t.id === 'string' && t.id.match(/^[0-9]+$/) ? parseInt(t.id) : t.id,
+          user_id: t.user_id || '',
+          problem_description: t.body || t.problem_description || '',
+          status: t.status || 'Open',
+          category: t.category_id || t.category || '',
+          priority: t.priority || '',
+          queue: t.assigned_department_id || t.queue || '',
+          problem_type: t.issue_type || t.problem_type || '',
+          needs_clarification: t.ai_confidence !== null && t.ai_confidence < 0.7,
+          subject: t.subject || '',
+          created_at: t.created_at,
+          updated_at: t.updated_at,
+          closed_at: t.closed_at || undefined
+        }));
       } else {
-        // Используем новый сгенерированный API
-        const statusMap: Record<string, 'new' | 'auto_resolved' | 'in_work' | 'waiting' | 'closed'> = {
-          'Open': 'new',
-          'In Progress': 'in_work',
-          'Pending': 'waiting',
-          'Closed': 'closed'
-        };
+        // Используем прямой API запрос с фильтрами
+        const params = new URLSearchParams();
+        params.append('skip', '0');
+        params.append('limit', '100');
+        if (status) params.append('status', status);
+        if (categoryName) params.append('category_name', categoryName);
+        if (dateFrom) params.append('date_from', dateFrom);
+        if (dateTo) params.append('date_to', dateTo);
         
-        const status = filter.status?.[0] ? statusMap[filter.status[0]] || undefined : undefined;
-        
-        const tickets = await api.tickets.list({ 
-          skip: 0,
-          limit: 50,
-          status 
-        });
+        const { apiRequest } = await import('../utils/apiConfig');
+        const apiTickets = await apiRequest(`/tickets?${params.toString()}`);
         
         // Преобразуем новые типы в старые для обратной совместимости
-        const convertedTickets: Ticket[] = tickets.map(t => ({
-          id: parseInt(t.id) || 0,
+        tickets = apiTickets.map(t => ({
+          id: t.id.match(/^[0-9]+$/) ? parseInt(t.id) : t.id,
           user_id: t.user_id,
           problem_description: t.body,
           status: t.status,
@@ -107,9 +146,10 @@ export const MyTickets: React.FC = () => {
           updated_at: t.updated_at,
           closed_at: t.closed_at || undefined
         }));
-        
-        setTickets(convertedTickets);
       }
+      
+      // Фильтры применяются на бэкенде, просто устанавливаем результат
+      setTickets(tickets);
     } catch (error) {
       console.error('Error loading tickets:', error);
       showToast(t('error.load_tickets') || 'Ошибка при загрузке заявок', 'error');
@@ -273,10 +313,11 @@ export const MyTickets: React.FC = () => {
               style={{ padding: '8px 12px', borderRadius: '6px', border: '1px solid #ddd' }}
             >
               <option value="">{t('tickets.all_categories')}</option>
+              <option value="Общие вопросы">Общие вопросы</option>
               <option value="Техническая поддержка">Техническая поддержка</option>
-              <option value="IT поддержка">IT поддержка</option>
-              <option value="Биллинг и платежи">Биллинг и платежи</option>
-              <option value="HR">HR</option>
+              <option value="Биллинг">Биллинг</option>
+              <option value="HR вопросы">HR вопросы</option>
+              <option value="Клиентский сервис">Клиентский сервис</option>
             </select>
 
             <input

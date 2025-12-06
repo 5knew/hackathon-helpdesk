@@ -15,6 +15,7 @@ class UserRole(str, enum.Enum):
     """Роли пользователей"""
     CLIENT = "client"
     EMPLOYEE = "employee"
+    ADMIN = "admin"  # Администратор системы
 
 
 class User(Base):
@@ -32,4 +33,8 @@ class User(Base):
     # Relationships
     tickets = relationship("Ticket", back_populates="user")
     sent_messages = relationship("TicketMessage", foreign_keys="TicketMessage.sender_id", back_populates="sender")
+    notifications = relationship("Notification", back_populates="user")
+    feedback = relationship("Feedback", back_populates="user")
+    ticket_history = relationship("TicketHistory", back_populates="user")
+    templates = relationship("Template", back_populates="creator")
 

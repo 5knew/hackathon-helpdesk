@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { Template } from '../types';
-import { getTemplates } from '../utils/api';
+import { getTemplates } from '../utils/ticket';
+import { apiRequest } from '../utils/apiConfig';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
 import { useLanguage } from '../contexts/LanguageContext';
@@ -34,35 +35,60 @@ export const TemplateEditor: React.FC = () => {
     }
   };
 
-  const handleSaveTemplate = () => {
+  const handleSaveTemplate = async () => {
     if (!newTemplate.name || !newTemplate.text) {
       showToast(t('settings.template_required'), 'error');
       return;
     }
     
-    // Имитация сохранения
-    const template: Template = {
-      id: editingTemplate?.id || Date.now(),
-      ...newTemplate,
-      language: newTemplate.language as 'ru' | 'kz' | 'en'
-    };
-    
-    if (editingTemplate) {
-      setTemplates(templates.map(t => t.id === editingTemplate.id ? template : t));
-      showToast(t('settings.template_updated'), 'success');
-    } else {
-      setTemplates([...templates, template]);
-      showToast(t('settings.template_created'), 'success');
+    try {
+      if (editingTemplate) {
+        // Обновляем существующий шаблон
+        await apiRequest(`/templates/${editingTemplate.id}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            name: newTemplate.name,
+            content: newTemplate.text,
+            category_id: newTemplate.category || null
+          })
+        });
+        showToast(t('settings.template_updated'), 'success');
+      } else {
+        // Создаем новый шаблон
+        await apiRequest('/templates', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: newTemplate.name,
+            content: newTemplate.text,
+            category_id: newTemplate.category || null
+          })
+        });
+        showToast(t('settings.template_created'), 'success');
+      }
+      
+      setEditingTemplate(null);
+      setNewTemplate({ name: '', category: '', text: '', language: 'ru' });
+      await loadTemplates(); // Перезагружаем список
+    } catch (error) {
+      console.error('Error saving template:', error);
+      showToast(t('settings.template_save_error') || 'Ошибка сохранения шаблона', 'error');
     }
-    
-    setEditingTemplate(null);
-    setNewTemplate({ name: '', category: '', text: '', language: 'ru' });
   };
 
-  const handleDeleteTemplate = (id: number) => {
-    if (window.confirm(t('settings.template_delete_confirm'))) {
-      setTemplates(templates.filter(t => t.id !== id));
+  const handleDeleteTemplate = async (id: number | string) => {
+    if (!window.confirm(t('settings.template_delete_confirm'))) {
+      return;
+    }
+    
+    try {
+      await apiRequest(`/templates/${id}`, {
+        method: 'DELETE'
+      });
       showToast(t('settings.template_deleted'), 'success');
+      await loadTemplates(); // Перезагружаем список
+    } catch (error) {
+      console.error('Error deleting template:', error);
+      showToast(t('settings.template_delete_error') || 'Ошибка удаления шаблона', 'error');
     }
   };
 

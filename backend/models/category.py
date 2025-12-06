@@ -20,4 +20,5 @@ class Category(Base):
     # Relationships
     tickets = relationship("Ticket", back_populates="category")
     training_samples = relationship("TrainingSample", back_populates="category")
+    templates = relationship("Template", back_populates="category")
 

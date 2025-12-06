@@ -1,6 +1,7 @@
 /**
  * Конфигурация API для связи frontend с backend
  */
+import { storage } from './storage';
 
 // Базовый URL backend API
 export const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8002';
@@ -33,9 +34,17 @@ export async function apiRequest<T>(
 ): Promise<T> {
   const url = `${API_BASE_URL}${endpoint}`;
   
-  const defaultHeaders = {
+  // Получаем токен из storage
+  const token = storage.getToken();
+  
+  const defaultHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
   };
+  
+  // Добавляем токен авторизации, если есть
+  if (token) {
+    defaultHeaders['Authorization'] = `Bearer ${token}`;
+  }
 
   const config: RequestInit = {
     ...options,

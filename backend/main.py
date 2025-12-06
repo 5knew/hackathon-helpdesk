@@ -3,7 +3,7 @@
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routers import tickets, auth
+from routers import tickets, auth, comments, notifications, feedback, templates, ticket_history
 
 app = FastAPI(
     title="Help Desk API",
@@ -21,7 +21,14 @@ app.add_middleware(
 )
 
 # Подключаем роутеры
+# ВАЖНО: Роутер комментариев должен быть ПЕРЕД роутером тикетов,
+# чтобы более специфичные маршруты обрабатывались первыми
 app.include_router(auth.router)
+app.include_router(comments.router)  # Комментарии ПЕРЕД тикетами
+app.include_router(notifications.router)  # Уведомления
+app.include_router(feedback.router)  # CSAT Feedback
+app.include_router(templates.router)  # Шаблоны ответов
+app.include_router(ticket_history.router)  # История изменений
 app.include_router(tickets.router)
 
 

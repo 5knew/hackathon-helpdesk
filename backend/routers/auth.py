@@ -52,17 +52,20 @@ def register_user(
     """
     Регистрация нового пользователя
     """
-    # Проверяем, существует ли пользователь с таким email
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
+    # Нормализуем email (убираем пробелы, приводим к нижнему регистру)
+    normalized_email = user_data.email.strip().lower()
+    
+    # Проверяем, существует ли пользователь с таким email (регистронезависимый поиск)
+    existing_user = db.query(User).filter(User.email.ilike(normalized_email)).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Пользователь с таким email уже существует"
         )
     
-    # Создаем нового пользователя
+    # Создаем нового пользователя (сохраняем нормализованный email)
     user = User(
-        email=user_data.email,
+        email=normalized_email,
         name=user_data.name,
         phone=user_data.phone,
         position=user_data.position,
@@ -85,21 +88,41 @@ def login_user(
     """
     Вход пользователя (получение токена)
     """
-    # Находим пользователя по email
-    user = db.query(User).filter(User.email == login_data.email).first()
+    # Логируем входящие данные для отладки
+    print(f"[LOGIN] Attempt: email='{login_data.email}' (type: {type(login_data.email)}), password='{login_data.password}' (length: {len(login_data.password)})")
+    
+    # Нормализуем email (убираем пробелы, приводим к нижнему регистру)
+    # EmailStr уже может быть нормализован, но на всякий случай делаем еще раз
+    normalized_email = str(login_data.email).strip().lower()
+    print(f"[LOGIN] Normalized email: '{normalized_email}'")
+    
+    # Находим пользователя по email (регистронезависимый поиск)
+    user = db.query(User).filter(User.email.ilike(normalized_email)).first()
     
     if not user:
+        print(f"[LOGIN] User not found for email: '{normalized_email}'")
+        # Показываем все пользователи для отладки
+        all_users = db.query(User).all()
+        print(f"[LOGIN] Available users: {[u.email for u in all_users]}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверный email или пароль"
         )
     
+    print(f"[LOGIN] User found: {user.email}, has_password: {user.password_hash is not None}")
+    
     # Проверяем пароль
-    if not user.password_hash or not verify_password(login_data.password, user.password_hash):
+    password_match = verify_password(login_data.password, user.password_hash) if user.password_hash else False
+    print(f"[LOGIN] Password match: {password_match}")
+    
+    if not user.password_hash or not password_match:
+        print(f"[LOGIN] Password verification failed")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Неверный email или пароль"
         )
+    
+    print(f"[LOGIN] Login successful for: {user.email}")
     
     # Создаем токен
     access_token = create_access_token(str(user.id))
@@ -122,7 +145,11 @@ def login_user_form(
     """
     Вход через OAuth2 форму (для Swagger UI)
     """
-    user = db.query(User).filter(User.email == form_data.username).first()
+    # Нормализуем email
+    normalized_email = form_data.username.strip().lower()
+    
+    # Находим пользователя по email (регистронезависимый поиск)
+    user = db.query(User).filter(User.email.ilike(normalized_email)).first()
     
     if not user:
         raise HTTPException(

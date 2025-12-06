@@ -36,6 +36,8 @@ class TicketResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     closed_at: Optional[datetime]
+    sla_deadline: Optional[datetime] = None
+    is_escalated: bool = False
     
     class Config:
         from_attributes = True

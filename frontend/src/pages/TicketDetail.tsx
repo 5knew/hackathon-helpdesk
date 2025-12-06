@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { Ticket, Comment, TicketHistory } from '../types';
-import { getTicket, getComments, addComment, submitFeedback, getTemplates } from '../utils/ticket';
+import { getTicket, getComments, addComment, submitFeedback, getTemplates, closeTicket } from '../utils/ticket';
 import { getTicketHistory } from '../utils/api';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
@@ -9,7 +9,6 @@ import { format } from 'date-fns';
 import { ru } from 'date-fns/locale';
 import { Template } from '../types';
 import { useLanguage } from '../contexts/LanguageContext';
-import { simulateEmailNotification } from '../utils/notifications';
 
 export const TicketDetail: React.FC = () => {
   const { t } = useLanguage();
@@ -26,6 +25,7 @@ export const TicketDetail: React.FC = () => {
   const [csatComment, setCsatComment] = useState('');
   const [templates, setTemplates] = useState<Template[]>([]);
   const [showTemplates, setShowTemplates] = useState(false);
+  const [closingTicket, setClosingTicket] = useState(false);
 
   useEffect(() => {
     if (!storage.isLogged()) {
@@ -41,19 +41,41 @@ export const TicketDetail: React.FC = () => {
     if (!id) return;
     setLoading(true);
     try {
+      // id может быть UUID (строка) или число, передаем как есть
       const [ticketData, commentsData, historyData] = await Promise.all([
-        getTicket(Number(id)),
-        getComments(Number(id)),
-        getTicketHistory(Number(id)).catch(() => []) // История может быть не реализована
+        getTicket(id),
+        getComments(id),
+        getTicketHistory(id).catch(() => []) // История может быть не реализована
       ]);
       setTicket(ticketData);
       // Преобразуем комментарии для отображения
-      const displayComments = commentsData.map(c => ({
-        ...c,
-        author: c.user_id || c.author || 'Unknown',
-        text: c.comment_text || c.text || '',
-        author_type: c.is_auto_reply ? 'system' as const : 'user' as const
-      }));
+      const displayComments = commentsData.map(c => {
+        // Определяем тип автора на основе роли
+        let authorType: 'user' | 'operator' | 'system' | 'admin' = 'user';
+        if (c.is_auto_reply) {
+          authorType = 'system';
+        } else if (c.user_role === 'admin') {
+          authorType = 'admin';
+        } else if (c.user_role === 'employee') {
+          authorType = 'operator';
+        }
+        
+        // Формируем имя автора с учетом роли
+        let authorName = c.user_name || c.user_email || c.user_id || 'Неизвестный пользователь';
+        if (c.user_role === 'admin') {
+          // Для админа показываем имя "Админ" или email, если имени нет
+          authorName = c.user_name || c.user_email || 'Админ';
+        } else if (c.user_role === 'employee') {
+          authorName = `👨‍💼 Оператор${c.user_name ? ` (${c.user_name})` : ''}`;
+        }
+        
+        return {
+          ...c,
+          author: authorName,
+          text: c.comment_text || c.text || '',
+          author_type: authorType
+        };
+      });
       setComments(displayComments);
       setHistory(historyData);
       
@@ -63,9 +85,18 @@ export const TicketDetail: React.FC = () => {
         setTemplates(templatesData);
       }
       
-      // Показываем CSAT модалку если тикет закрыт
-      if (ticketData && ticketData.status === 'Closed') {
-        setShowCSAT(true);
+      // Показываем CSAT модалку если тикет закрыт и нет существующей оценки
+      if (ticketData && (ticketData.status === 'Closed' || ticketData.status === 'closed' || ticketData.status === 'auto_resolved')) {
+        try {
+          const { apiRequest } = await import('../utils/apiConfig');
+          const existingFeedback = await apiRequest(`/tickets/${id}/feedback`).catch(() => null);
+          if (!existingFeedback) {
+            setShowCSAT(true);
+          }
+        } catch (error) {
+          // Если ошибка, все равно показываем модалку
+          setShowCSAT(true);
+        }
       }
     } catch (error) {
       showToast(t('error.load_data'), 'error');
@@ -78,26 +109,83 @@ export const TicketDetail: React.FC = () => {
     if (!newComment.trim() || !id) return;
     setSubmittingComment(true);
     try {
-      const comment = await addComment(Number(id), newComment, false);
+      // id может быть UUID (строка) или число, передаем как есть
+      const comment = await addComment(id, newComment, false);
+      // Определяем тип автора на основе роли
+      let authorType: 'user' | 'operator' | 'system' | 'admin' = 'user';
+      if (comment.is_auto_reply) {
+        authorType = 'system';
+      } else if (comment.user_role === 'admin') {
+        authorType = 'admin';
+      } else if (comment.user_role === 'employee') {
+        authorType = 'operator';
+      }
+      
+      // Формируем имя автора с учетом роли
+      let authorName = comment.user_name || comment.user_email || comment.user_id || 'Неизвестный пользователь';
+      if (comment.user_role === 'admin') {
+        // Для админа показываем имя "Админ" или email, если имени нет
+        authorName = comment.user_name || comment.user_email || 'Админ';
+      } else if (comment.user_role === 'employee') {
+        authorName = `👨‍💼 Оператор${comment.user_name ? ` (${comment.user_name})` : ''}`;
+      }
+      
       // Преобразуем для отображения
       const displayComment: Comment = {
         ...comment,
-        author: comment.user_id,
+        author: authorName,
         text: comment.comment_text,
-        author_type: 'user' as const
+        author_type: authorType
       };
       setComments([...comments, displayComment]);
       setNewComment('');
       showToast(t('error.comment_added'), 'success');
       
-      // Имитация email-уведомления
-      if (ticket) {
-        simulateEmailNotification(ticket, 'comment');
-      }
+      // Перезагружаем комментарии для получения актуальных данных
+      await loadTicketData();
     } catch (error) {
+      console.error('Error adding comment:', error);
       showToast(t('error.add_comment'), 'error');
     } finally {
       setSubmittingComment(false);
+    }
+  };
+
+  const handleCloseTicket = async () => {
+    if (!id || !ticket) return;
+    
+    const confirmed = window.confirm(t('tickets.detail.close_confirm') || 'Вы уверены, что хотите закрыть этот вопрос? Проблема решена?');
+    if (!confirmed) return;
+    
+    setClosingTicket(true);
+    try {
+      await closeTicket(id);
+      showToast(t('tickets.detail.closed_success') || 'Вопрос успешно закрыт', 'success');
+      // Перезагружаем данные тикета
+      await loadTicketData();
+      
+      // После закрытия показываем CSAT модалку
+      // Проверяем, нет ли уже оценки
+      try {
+        const { apiRequest } = await import('../utils/apiConfig');
+        const existingFeedback = await apiRequest(`/tickets/${id}/feedback`).catch(() => null);
+        if (!existingFeedback) {
+          // Небольшая задержка, чтобы пользователь увидел сообщение об успехе
+          setTimeout(() => {
+            setShowCSAT(true);
+          }, 500);
+        }
+      } catch (error) {
+        // Если ошибка при проверке, все равно показываем модалку
+        setTimeout(() => {
+          setShowCSAT(true);
+        }, 500);
+      }
+    } catch (error) {
+      console.error('Error closing ticket:', error);
+      showToast(t('tickets.detail.close_error') || 'Ошибка при закрытии вопроса', 'error');
+    } finally {
+      setClosingTicket(false);
     }
   };
 
@@ -107,7 +195,7 @@ export const TicketDetail: React.FC = () => {
       return;
     }
     try {
-      await submitFeedback(Number(id), csatScore, csatComment);
+      await submitFeedback(id, csatScore, csatComment);
       showToast(t('tickets.detail.csat.thanks'), 'success');
       setShowCSAT(false);
       loadTicketData();
@@ -170,17 +258,27 @@ export const TicketDetail: React.FC = () => {
                 <p className="muted">{t('tickets.detail.created')}: {format(new Date(ticket.created_at), 'dd MMMM yyyy, HH:mm', { locale: ru })}</p>
               )}
             </div>
-            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-              <span className={`chip ${ticket.status === 'Closed' ? 'success' : ticket.status === 'In Progress' ? 'info' : 'ghost'}`}>
-                {ticket.status === 'Open' ? t('tickets.status.open') : 
-                 ticket.status === 'In Progress' ? t('tickets.status.in_progress') :
-                 ticket.status === 'Closed' ? t('tickets.status.closed') : t('tickets.status.waiting')}
+            <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span className={`chip ${ticket.status === 'Closed' || ticket.status === 'closed' ? 'success' : ticket.status === 'In Progress' || ticket.status === 'in_work' ? 'info' : 'ghost'}`}>
+                {ticket.status === 'Open' || ticket.status === 'new' ? t('tickets.status.open') : 
+                 ticket.status === 'In Progress' || ticket.status === 'in_work' ? t('tickets.status.in_progress') :
+                 ticket.status === 'Closed' || ticket.status === 'closed' ? t('tickets.status.closed') : t('tickets.status.waiting')}
               </span>
               <span className="chip ghost">{ticket.category}</span>
-              <span className={`chip ${ticket.priority === 'Высокий' ? 'error' : ticket.priority === 'Средний' ? 'warning' : 'ghost'}`}>
+              <span className={`chip ${ticket.priority === 'Высокий' || ticket.priority === 'high' ? 'error' : ticket.priority === 'Средний' || ticket.priority === 'medium' ? 'warning' : 'ghost'}`}>
                 {ticket.priority}
               </span>
               {ticket.queue === 'Automated' && <span className="chip success">{t('tickets.auto_closed') || 'Автоматически закрыто'}</span>}
+              {(ticket.status !== 'Closed' && ticket.status !== 'closed') && (
+                <button
+                  className="secondary"
+                  onClick={handleCloseTicket}
+                  disabled={closingTicket}
+                  style={{ marginLeft: 'auto', padding: '6px 12px', fontSize: '0.9em' }}
+                >
+                  {closingTicket ? t('tickets.detail.closing') || 'Закрытие...' : 'Закрыть вопрос'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -258,50 +356,88 @@ export const TicketDetail: React.FC = () => {
                   <div
                     key={comment.id}
                     style={{
-                      padding: '16px',
-                      background: comment.author_type === 'system' ? '#e7f3ff' : 
-                                  comment.is_auto_reply ? '#fff3cd' : 
+                      padding: '18px',
+                      background: comment.author_type === 'admin' ? '#fff5f5' : 
+                                  comment.author_type === 'system' ? '#e8f4f8' : 
+                                  comment.is_auto_reply ? '#fff8e1' : 
                                   comment.author_type === 'operator' ? '#e8f5e9' : '#f8f9fa',
-                      borderRadius: '8px',
-                      borderLeft: comment.author_type === 'user' ? '4px solid #007bff' : 
-                                 comment.is_auto_reply ? '4px solid #ffc107' : 
-                                 comment.author_type === 'operator' ? '4px solid #28a745' : '4px solid #17a2b8',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.05)'
+                      borderRadius: '12px',
+                      borderLeft: comment.author_type === 'admin' ? '5px solid #dc3545' :
+                                 comment.author_type === 'user' ? '5px solid #007bff' : 
+                                 comment.is_auto_reply ? '5px solid #ffc107' : 
+                                 comment.author_type === 'operator' ? '5px solid #28a745' : '5px solid #17a2b8',
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                      marginBottom: '16px',
+                      border: comment.author_type === 'admin' ? '2px solid #ffebee' : '2px solid transparent'
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', alignItems: 'center' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <strong style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                        <strong style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '8px',
+                          color: comment.author_type === 'admin' ? '#c62828' : 
+                                 comment.author_type === 'operator' ? '#1565c0' : 
+                                 comment.author_type === 'system' ? '#2e7d32' : '#333',
+                          fontSize: '1.05em',
+                          fontWeight: 'bold'
+                        }}>
                           {comment.author_type === 'user' && '👤'}
                           {comment.author_type === 'operator' && '👨‍💼'}
+                          {comment.author_type === 'admin' && '👨‍💼'}
                           {comment.author_type === 'system' && '🤖'}
                           {comment.author}
                         </strong>
                         {comment.is_auto_reply && (
-                          <span className="chip success" style={{ fontSize: '0.75em', padding: '2px 8px' }}>
+                          <span style={{ fontSize: '0.8em', padding: '4px 10px', background: '#fff8e1', color: '#f57c00', fontWeight: 'bold', borderRadius: '6px', border: '1px solid #ffc107' }}>
                             🤖 {t('tickets.detail.auto_reply')}
                           </span>
                         )}
                         {comment.author_type === 'system' && !comment.is_auto_reply && (
-                          <span className="chip info" style={{ fontSize: '0.75em', padding: '2px 8px' }}>
+                          <span style={{ fontSize: '0.8em', padding: '4px 10px', background: '#e3f2fd', color: '#1565c0', fontWeight: 'bold', borderRadius: '6px', border: '1px solid #2196f3' }}>
                             {t('tickets.detail.system')}
                           </span>
                         )}
+                        {comment.author_type === 'admin' && (
+                          <span style={{ fontSize: '0.8em', padding: '5px 12px', background: '#ffebee', color: '#c62828', fontWeight: 'bold', borderRadius: '6px', border: '2px solid #dc3545' }}>
+                            🔴 Администратор
+                          </span>
+                        )}
                         {comment.author_type === 'operator' && (
-                          <span className="chip" style={{ fontSize: '0.75em', padding: '2px 8px', background: '#e7f3ff', color: '#0066cc' }}>
+                          <span style={{ fontSize: '0.8em', padding: '5px 12px', background: '#e8f5e9', color: '#2e7d32', fontWeight: 'bold', borderRadius: '6px', border: '1px solid #28a745' }}>
                             {t('tickets.detail.operator')}
                           </span>
                         )}
                       </div>
                       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
-                        <span className="muted" style={{ fontSize: '0.85em' }}>
-                          {format(new Date(comment.created_at), 'dd MMM HH:mm', { locale: ru })}
+                        <span style={{ fontSize: '0.9em', color: '#666', fontWeight: '500' }}>
+                          📅 {format(new Date(comment.created_at), 'dd MMM HH:mm', { locale: ru })}
                         </span>
                       </div>
                     </div>
-                    <p style={{ margin: '0 0 8px 0', whiteSpace: 'pre-wrap', lineHeight: '1.5' }}>{comment.text}</p>
+                    <p style={{ 
+                      margin: '12px 0 10px 0', 
+                      whiteSpace: 'pre-wrap', 
+                      lineHeight: '1.7', 
+                      color: '#222', 
+                      fontSize: '1em',
+                      fontWeight: '400'
+                    }}>
+                      {comment.text}
+                    </p>
                     {responseTimeMinutes > 0 && responseTimeMinutes < 1440 && (
-                      <div style={{ fontSize: '0.75em', color: '#666', fontStyle: 'italic', marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #ddd' }}>
+                      <div style={{ 
+                        fontSize: '0.85em', 
+                        color: '#555', 
+                        fontStyle: 'italic', 
+                        marginTop: '12px', 
+                        paddingTop: '12px', 
+                        borderTop: '2px solid #e0e0e0',
+                        background: '#fafafa',
+                        padding: '10px',
+                        borderRadius: '6px'
+                      }}>
                         ⏱️ {t('tickets.detail.response_time')}: {responseTimeMinutes < 60 
                           ? `${responseTimeMinutes} ${t('tickets.detail.minutes')}`
                           : `${Math.floor(responseTimeMinutes / 60)} ${t('tickets.detail.hours')}`}
@@ -414,32 +550,70 @@ export const TicketDetail: React.FC = () => {
         >
           <div
             className="card"
-            style={{ maxWidth: '500px', width: '90%', zIndex: 1001 }}
+            style={{ 
+              maxWidth: '550px', 
+              width: '90%', 
+              zIndex: 1001,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+              animation: 'fadeIn 0.3s ease-in'
+            }}
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 style={{ margin: '0 0 16px 0' }}>{t('tickets.detail.csat.title')}</h2>
-            <p className="muted" style={{ marginBottom: '16px' }}>
-              {t('tickets.detail.csat.desc')}
-            </p>
+            <div style={{ 
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              color: 'white',
+              padding: '20px',
+              borderRadius: '8px 8px 0 0',
+              margin: '-20px -20px 20px -20px'
+            }}>
+              <h2 style={{ margin: '0 0 8px 0', fontSize: '1.5em' }}>⭐ {t('tickets.detail.csat.title')}</h2>
+              <p style={{ margin: 0, opacity: 0.95, fontSize: '0.95em' }}>
+                {t('tickets.detail.csat.desc')}
+              </p>
+            </div>
             
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '16px' }}>
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', marginBottom: '16px', flexWrap: 'wrap' }}>
               {[1, 2, 3, 4, 5].map((score) => (
                 <button
                   key={score}
                   className={csatScore === score ? 'primary' : 'ghost'}
                   onClick={() => setCsatScore(score)}
                   style={{
-                    fontSize: '2em',
-                    width: '60px',
-                    height: '60px',
+                    fontSize: '2.5em',
+                    width: '70px',
+                    height: '70px',
                     padding: 0,
-                    borderRadius: '50%'
+                    borderRadius: '50%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    cursor: 'pointer',
+                    transition: 'transform 0.2s',
+                    border: csatScore === score ? '3px solid #007bff' : '2px solid #ddd'
                   }}
+                  onMouseEnter={(e) => {
+                    if (csatScore !== score) {
+                      e.currentTarget.style.transform = 'scale(1.1)';
+                      e.currentTarget.style.borderColor = '#007bff';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (csatScore !== score) {
+                      e.currentTarget.style.transform = 'scale(1)';
+                      e.currentTarget.style.borderColor = '#ddd';
+                    }
+                  }}
+                  title={`Оценка ${score} из 5`}
                 >
                   ⭐
                 </button>
               ))}
             </div>
+            {csatScore > 0 && (
+              <p style={{ textAlign: 'center', marginBottom: '16px', color: '#007bff', fontWeight: 'bold' }}>
+                Вы выбрали: {csatScore} {csatScore === 1 ? 'звезда' : csatScore < 5 ? 'звезды' : 'звезд'} из 5
+              </p>
+            )}
 
             <div className="field">
               <label>{t('tickets.detail.csat.comment')}</label>
@@ -451,12 +625,27 @@ export const TicketDetail: React.FC = () => {
               />
             </div>
 
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button className="ghost" onClick={() => setShowCSAT(false)}>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '20px' }}>
+              <button 
+                className="ghost" 
+                onClick={() => setShowCSAT(false)}
+                style={{ padding: '10px 20px' }}
+              >
                 {t('tickets.detail.csat.skip')}
               </button>
-              <button className="primary" onClick={handleSubmitCSAT} disabled={csatScore === 0}>
-                {t('tickets.detail.csat.submit')}
+              <button 
+                className="primary" 
+                onClick={handleSubmitCSAT} 
+                disabled={csatScore === 0}
+                style={{ 
+                  padding: '10px 24px',
+                  fontSize: '1em',
+                  fontWeight: 'bold',
+                  opacity: csatScore === 0 ? 0.5 : 1,
+                  cursor: csatScore === 0 ? 'not-allowed' : 'pointer'
+                }}
+              >
+                {t('tickets.detail.csat.submit')} {csatScore > 0 && `(${csatScore}/5)`}
               </button>
             </div>
           </div>

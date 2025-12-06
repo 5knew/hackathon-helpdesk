@@ -4,7 +4,7 @@ import { Chip } from '../components/Chip';
 import { Metrics, TicketResult } from '../types';
 import { storage } from '../utils/storage';
 import { showToast } from '../utils/toast';
-import { fetchMetrics } from '../utils/metrics';
+import { fetchMetrics, mockMetrics } from '../utils/metrics';
 import { submitTicketToAPI, ticketExamples } from '../utils/ticket';
 import { exportMetricsToPDF } from '../utils/export';
 import { api } from '../utils/apiGenerated';
@@ -34,6 +34,7 @@ export const Dashboard: React.FC = () => {
 
     loadMetrics();
     loadNewTicketsCount();
+    // Уведомления загружаются автоматически через NotificationsPanel
   }, [navigate]);
 
   const loadNewTicketsCount = async () => {
@@ -89,10 +90,11 @@ export const Dashboard: React.FC = () => {
     try {
       const newMetrics = await fetchMetrics();
       setMetrics(newMetrics);
-      showToast(t('error.metrics_updated'), 'success');
+      // Не показываем toast для метрик, так как они могут быть моками
     } catch (error) {
       console.error('Error loading metrics:', error);
-      showToast(t('error.load_metrics'), 'error');
+      // Не показываем ошибку пользователю, используем моки
+      setMetrics(mockMetrics());
     }
   };
 

@@ -63,13 +63,17 @@ export async function getTickets(
   return apiRequest<TicketListResponse>(`/tickets?${params.toString()}`);
 }
 
-export async function getTicket(ticket_id: number): Promise<Ticket> {
+export async function getTicket(ticket_id: number | string): Promise<Ticket> {
   // Используем новый сгенерированный API
-  const ticket: TicketResponse = await api.tickets.getById(ticket_id.toString());
+  // ticket_id может быть UUID (строка) или число
+  const ticketIdStr = typeof ticket_id === 'string' ? ticket_id : ticket_id.toString();
+  const ticket: TicketResponse = await api.tickets.getById(ticketIdStr);
   
   // Преобразуем новый тип в старый для обратной совместимости
+  // Сохраняем UUID как строку, если это UUID
+  const ticketId = ticket.id.match(/^[0-9]+$/) ? parseInt(ticket.id) : ticket.id;
   return {
-    id: parseInt(ticket.id) || ticket_id,
+    id: ticketId,
     user_id: ticket.user_id,
     problem_description: ticket.body,
     status: ticket.status,
@@ -86,7 +90,7 @@ export async function getTicket(ticket_id: number): Promise<Ticket> {
 }
 
 export async function updateTicket(
-  ticket_id: number,
+  ticket_id: number | string,
   status?: string,
   priority?: string,
   category?: string,
@@ -101,11 +105,12 @@ export async function updateTicket(
     assigned_department_id: queue || undefined
   };
   
-  const ticket: TicketResponse = await api.tickets.update(ticket_id.toString(), updateData);
+  const ticketIdStr = typeof ticket_id === 'string' ? ticket_id : ticket_id.toString();
+  const ticket: TicketResponse = await api.tickets.update(ticketIdStr, updateData);
   
   // Преобразуем новый тип в старый для обратной совместимости
   return {
-    id: parseInt(ticket.id) || ticket_id,
+    id: typeof ticket.id === 'string' && ticket.id.match(/^[0-9]+$/) ? parseInt(ticket.id) : ticket.id,
     user_id: ticket.user_id,
     problem_description: ticket.body,
     status: ticket.status,
@@ -121,36 +126,76 @@ export async function updateTicket(
   };
 }
 
-export async function getComments(ticket_id: number): Promise<Comment[]> {
-  return apiRequest<Comment[]>(`/tickets/${ticket_id}/comments`);
+export async function closeTicket(ticket_id: number | string): Promise<Ticket> {
+  // Закрываем тикет, устанавливая статус "closed"
+  return updateTicket(ticket_id, 'closed');
+}
+
+export async function getComments(ticket_id: number | string): Promise<Comment[]> {
+  const ticketIdStr = typeof ticket_id === 'string' ? ticket_id : ticket_id.toString();
+  try {
+    return await apiRequest<Comment[]>(`/tickets/${ticketIdStr}/comments`);
+  } catch (error) {
+    // Если эндпоинт не существует (404), возвращаем пустой массив
+    if (error instanceof Error && error.message.includes('404')) {
+      console.warn('Comments endpoint not found, returning empty array');
+      return [];
+    }
+    // Для других ошибок тоже возвращаем пустой массив, чтобы не ломать загрузку тикета
+    console.warn('Error loading comments:', error);
+    return [];
+  }
 }
 
 export async function addComment(
-  ticket_id: number,
+  ticket_id: number | string,
   comment_text: string,
   is_auto_reply: boolean = false
 ): Promise<Comment> {
-  return apiRequest<Comment>(`/tickets/${ticket_id}/comments`, {
+  const ticketIdStr = typeof ticket_id === 'string' ? ticket_id : ticket_id.toString();
+  return apiRequest<Comment>(`/tickets/${ticketIdStr}/comments`, {
     method: 'POST',
     body: JSON.stringify({ comment_text, is_auto_reply }),
   });
 }
 
-export async function searchTickets(query: string, limit: number = 50, offset: number = 0) {
+export async function searchTickets(
+  query: string, 
+  limit: number = 50, 
+  offset: number = 0,
+  status?: string,
+  categoryName?: string,
+  dateFrom?: string,
+  dateTo?: string
+) {
   const params = new URLSearchParams({ q: query, limit: limit.toString(), offset: offset.toString() });
+  if (status) params.append('status', status);
+  if (categoryName) params.append('category_name', categoryName);
+  if (dateFrom) params.append('date_from', dateFrom);
+  if (dateTo) params.append('date_to', dateTo);
   return apiRequest(`/tickets/search?${params.toString()}`);
 }
 
-export async function submitFeedback(ticket_id: number, rating: number, comment?: string): Promise<Feedback> {
-  return apiRequest<Feedback>(`/tickets/${ticket_id}/feedback`, {
+export async function submitFeedback(ticket_id: number | string, rating: number, comment?: string): Promise<Feedback> {
+  const ticketIdStr = typeof ticket_id === 'string' ? ticket_id : ticket_id.toString();
+  return apiRequest<Feedback>(`/tickets/${ticketIdStr}/feedback`, {
     method: 'POST',
     body: JSON.stringify({ rating, comment }),
   });
 }
 
 export async function getTemplates(category?: string): Promise<Template[]> {
-  const params = category ? `?category=${category}` : '';
-  return apiRequest<Template[]>(`/templates${params}`);
+  const params = category ? `?category_name=${category}` : '';
+  const templates = await apiRequest<any[]>(`/templates${params}`);
+  // Преобразуем в формат Template
+  return templates.map(t => ({
+    id: t.id,
+    name: t.name,
+    category: t.category_name || t.category_id || '',
+    text: t.content,
+    content: t.content,
+    language: 'ru' as 'ru' | 'kz' | 'en'
+  }));
 }
 
 export const ticketExamples = [

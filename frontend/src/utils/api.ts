@@ -46,8 +46,8 @@ export async function getUserTickets(filter?: TicketFilter): Promise<Ticket[]> {
     }));
   } catch (error) {
     console.error('Error fetching tickets:', error);
-    // Возвращаем моковые данные для демо
-    return getMockTickets();
+    // Возвращаем пустой массив вместо моков
+    return [];
   }
 }
 
@@ -84,67 +84,50 @@ export async function getTicketById(ticketId: number): Promise<Ticket | null> {
 // Получить комментарии тикета
 // ВНИМАНИЕ: Эндпоинт /tickets/{id}/comments пока не реализован в новом API
 // Используется старый API
-export async function getTicketComments(ticketId: number): Promise<Comment[]> {
+export async function getTicketComments(ticketId: number | string): Promise<Comment[]> {
   try {
-    const comments = await apiRequest<Comment[]>(`/tickets/${ticketId}/comments`);
+    const ticketIdStr = typeof ticketId === 'string' ? ticketId : ticketId.toString();
+    const comments = await apiRequest<Comment[]>(`/tickets/${ticketIdStr}/comments`);
     // Преобразуем для обратной совместимости
-    return comments.map(c => ({
-      ...c,
-      author: c.user_id,
-      text: c.comment_text,
-      author_type: c.is_auto_reply ? 'system' : 'user' as const
-    }));
+    return comments.map(c => {
+      // Определяем тип автора на основе роли
+      let authorType: 'user' | 'operator' | 'system' | 'admin' = 'user';
+      if (c.is_auto_reply) {
+        authorType = 'system';
+      } else if (c.user_role === 'admin') {
+        authorType = 'admin';
+      } else if (c.user_role === 'employee') {
+        authorType = 'operator';
+      }
+      
+      // Формируем имя автора с учетом роли
+      let authorName = c.user_name || c.user_email || c.user_id || 'Неизвестный пользователь';
+      if (c.user_role === 'admin') {
+        authorName = `👨‍💼 Администратор${c.user_name ? ` (${c.user_name})` : ''}`;
+      } else if (c.user_role === 'employee') {
+        authorName = `👨‍💼 Оператор${c.user_name ? ` (${c.user_name})` : ''}`;
+      }
+      
+      return {
+        ...c,
+        author: authorName,
+        text: c.comment_text,
+        author_type: authorType
+      };
+    });
   } catch (error) {
     console.error('Error fetching comments:', error);
-    // Возвращаем моковые данные для демо
-    return getMockComments(ticketId);
+    // Возвращаем пустой массив вместо моков
+    return [];
   }
 }
 
-function getMockComments(ticketId: number): Comment[] {
-  const now = new Date();
-  return [
-    {
-      id: 1,
-      ticket_id: ticketId,
-      user_id: 'AI Assistant',
-      comment_text: 'Ваша заявка получена и обрабатывается. Мы свяжемся с вами в ближайшее время.',
-      is_auto_reply: true,
-      created_at: new Date(now.getTime() - 3600000).toISOString(),
-      author: 'AI Assistant',
-      author_type: 'system',
-      text: 'Ваша заявка получена и обрабатывается. Мы свяжемся с вами в ближайшее время.'
-    },
-    {
-      id: 2,
-      ticket_id: ticketId,
-      user_id: 'Оператор Иван',
-      comment_text: 'Добрый день! Я изучил вашу проблему. Для решения необходимо проверить настройки системы. Сделаю это в течение часа.',
-      is_auto_reply: false,
-      created_at: new Date(now.getTime() - 1800000).toISOString(),
-      author: 'Оператор Иван',
-      author_type: 'operator',
-      text: 'Добрый день! Я изучил вашу проблему. Для решения необходимо проверить настройки системы. Сделаю это в течение часа.'
-    },
-    {
-      id: 3,
-      ticket_id: ticketId,
-      user_id: storage.getUser()?.email || 'user@example.com',
-      comment_text: 'Спасибо за быстрый ответ! Буду ждать.',
-      is_auto_reply: false,
-      created_at: new Date(now.getTime() - 900000).toISOString(),
-      author: storage.getUser()?.email || 'user@example.com',
-      author_type: 'user',
-      text: 'Спасибо за быстрый ответ! Буду ждать.'
-    }
-  ];
-}
-
 // Добавить комментарий
-export async function addComment(ticketId: number, text: string): Promise<Comment> {
+export async function addComment(ticketId: number | string, text: string): Promise<Comment> {
   const user = storage.getUser();
+  const ticketIdStr = typeof ticketId === 'string' ? ticketId : ticketId.toString();
   try {
-    const comment = await apiRequest<Comment>(`/tickets/${ticketId}/comments`, {
+    const comment = await apiRequest<Comment>(`/tickets/${ticketIdStr}/comments`, {
       method: 'POST',
       body: JSON.stringify({
         comment_text: text,
@@ -160,67 +143,28 @@ export async function addComment(ticketId: number, text: string): Promise<Commen
     };
   } catch (error) {
     console.error('Error adding comment:', error);
-    // Возвращаем моковый комментарий для демо
-    return {
-      id: Date.now(),
-      ticket_id: ticketId,
-      user_id: user?.email || 'guest',
-      comment_text: text,
-      is_auto_reply: false,
-      created_at: new Date().toISOString(),
-      author: user?.email || 'guest',
-      author_type: 'user',
-      text: text
-    };
+    // Пробрасываем ошибку дальше вместо возврата мока
+    throw error;
   }
 }
 
 // Получить историю изменений тикета
 // ВНИМАНИЕ: Эндпоинт /tickets/{id}/history пока не реализован в новом API
 // Возвращаем моковые данные
-export async function getTicketHistory(ticketId: number): Promise<TicketHistory[]> {
+export async function getTicketHistory(ticketId: number | string): Promise<TicketHistory[]> {
+  const ticketIdStr = typeof ticketId === 'string' ? ticketId : ticketId.toString();
+  return apiRequest<TicketHistory[]>(`/tickets/${ticketIdStr}/history`);
   try {
     // Эндпоинт /tickets/{id}/history пока не реализован в backend
     // Возвращаем моковые данные
-    return getMockHistory(ticketId);
+    return [];
   } catch (error) {
     console.error('Error fetching history:', error);
-    return getMockHistory(ticketId);
+    return [];
   }
 }
 
-function getMockHistory(ticketId: number): TicketHistory[] {
-  const now = new Date();
-  return [
-    {
-      id: 1,
-      ticket_id: ticketId,
-      action: 'Тикет создан',
-      changed_by: 'user@example.com',
-      old_value: undefined,
-      new_value: 'Open',
-      created_at: new Date(now.getTime() - 3600000).toISOString()
-    },
-    {
-      id: 2,
-      ticket_id: ticketId,
-      action: 'Статус изменен',
-      changed_by: 'AI System',
-      old_value: 'Open',
-      new_value: 'In Progress',
-      created_at: new Date(now.getTime() - 3300000).toISOString()
-    },
-    {
-      id: 3,
-      ticket_id: ticketId,
-      action: 'Приоритет изменен',
-      changed_by: 'Оператор Иван',
-      old_value: 'Средний',
-      new_value: 'Высокий',
-      created_at: new Date(now.getTime() - 3000000).toISOString()
-    }
-  ];
-}
+// Mock function removed - using real API only
 
 // Обновить статус тикета
 // УСТАРЕЛО: Используйте api.tickets.update() из apiGenerated.ts
@@ -281,7 +225,7 @@ export async function getTemplates(category?: string): Promise<Template[]> {
     }));
   } catch (error) {
     console.error('Error fetching templates:', error);
-    return getMockTemplates();
+    return [];
   }
 }
 
@@ -298,62 +242,5 @@ export async function getIntegrations(): Promise<Integration[]> {
   }
 }
 
-// Моковые данные для демо
-function getMockTickets(): Ticket[] {
-  return [
-    {
-      id: 1,
-      user_id: 'user@example.com',
-      problem_description: 'При попытке входа выдает ошибку неверного пароля',
-      status: 'Closed',
-      category: 'Техническая поддержка',
-      priority: 'Высокий',
-      problem_type: 'Типовой',
-      queue: 'TechSupport',
-      needs_clarification: false,
-      subject: 'Не могу войти в почту',
-      created_at: new Date(Date.now() - 86400000).toISOString(),
-      updated_at: new Date(Date.now() - 86400000).toISOString(),
-      closed_at: new Date(Date.now() - 86400000).toISOString()
-    },
-    {
-      id: 2,
-      user_id: 'user@example.com',
-      problem_description: 'Хочу перенести отпуск',
-      status: 'Pending',
-      category: 'HR',
-      priority: 'Средний',
-      problem_type: 'Сложный',
-      queue: 'GeneralSupport',
-      needs_clarification: false,
-      subject: 'Нужна помощь с HR системой',
-      created_at: new Date(Date.now() - 3600000).toISOString(),
-      updated_at: new Date(Date.now() - 1800000).toISOString(),
-      sla_deadline: new Date(Date.now() + 86400000).toISOString()
-    }
-  ];
-}
-
-function getMockTemplates(): Template[] {
-  return [
-    {
-      id: 1,
-      name: 'Стандартный ответ',
-      category: 'Техническая поддержка',
-      content: 'Спасибо за обращение. Наша техническая команда уже работает над решением вашей проблемы.',
-      created_at: new Date().toISOString(),
-      text: 'Спасибо за обращение. Наша техническая команда уже работает над решением вашей проблемы.',
-      language: 'ru'
-    },
-    {
-      id: 2,
-      name: 'Биллинг',
-      category: 'Биллинг и платежи',
-      content: 'Ваш запрос по биллингу получен. Мы обработаем его в течение 1-2 рабочих дней.',
-      created_at: new Date().toISOString(),
-      text: 'Ваш запрос по биллингу получен. Мы обработаем его в течение 1-2 рабочих дней.',
-      language: 'ru'
-    }
-  ];
-}
+// All mock functions removed - using real API only
 

@@ -73,15 +73,18 @@ export interface Ticket {
 }
 
 export interface Comment {
-  id: number;
-  ticket_id: number;
+  id: number | string; // Может быть UUID (строка) или число для обратной совместимости
+  ticket_id: number | string; // Может быть UUID (строка) или число для обратной совместимости
   user_id: string;  // Соответствует backend модели
+  user_name?: string;  // Имя пользователя
+  user_email?: string;  // Email пользователя
+  user_role?: string;  // Роль пользователя (admin, employee, client)
   comment_text: string;  // Соответствует backend модели
   is_auto_reply: boolean;
   created_at: string;
   // Для обратной совместимости
   author?: string;
-  author_type?: 'user' | 'operator' | 'system';
+  author_type?: 'user' | 'operator' | 'system' | 'admin';
   text?: string;
 }
 

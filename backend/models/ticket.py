@@ -79,6 +79,10 @@ class Ticket(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     closed_at = Column(DateTime, nullable=True)
     
+    # SLA
+    sla_deadline = Column(DateTime, nullable=True)  # Дедлайн по SLA
+    is_escalated = Column(Boolean, default=False)  # Эскалирован ли тикет
+    
     # Relationships
     user = relationship("User", back_populates="tickets")
     category = relationship("Category", back_populates="tickets")
@@ -87,4 +91,7 @@ class Ticket(Base):
     predictions = relationship("AIPrediction", back_populates="ticket", cascade="all, delete-orphan")
     auto_responses = relationship("AIAutoResponse", back_populates="ticket", cascade="all, delete-orphan")
     messages = relationship("TicketMessage", back_populates="ticket", cascade="all, delete-orphan")
+    notifications = relationship("Notification", back_populates="ticket", cascade="all, delete-orphan")
+    feedback = relationship("Feedback", back_populates="ticket", cascade="all, delete-orphan")
+    history = relationship("TicketHistory", back_populates="ticket", cascade="all, delete-orphan", order_by="TicketHistory.created_at")
 

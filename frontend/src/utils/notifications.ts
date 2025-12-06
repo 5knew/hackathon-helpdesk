@@ -1,60 +1,75 @@
-import { Ticket } from '../types';
-import { storage } from './storage';
+/**
+ * Утилиты для работы с уведомлениями
+ */
+import { apiRequest } from './apiConfig';
 
-// Имитация email-уведомлений
-export function simulateEmailNotification(ticket: Ticket, type: 'created' | 'updated' | 'closed' | 'comment') {
-  const user = storage.getUser();
-  if (!user) return;
-
-  const notifications = JSON.parse(localStorage.getItem('email_notifications') || '[]');
-  
-  const notification = {
-    id: Date.now(),
-    ticket_id: ticket.id,
-    ticket_subject: ticket.subject,
-    type,
-    email: user.email,
-    timestamp: new Date().toISOString(),
-    read: false,
-    message: getNotificationMessage(ticket, type)
-  };
-
-  notifications.unshift(notification);
-  localStorage.setItem('email_notifications', JSON.stringify(notifications.slice(0, 50)));
-  
-  // Показываем toast-уведомление
-  return notification;
+export interface Notification {
+  id: string;
+  user_id: string;
+  ticket_id?: string;
+  notification_type: string;
+  title: string;
+  message: string;
+  is_read: boolean;
+  created_at: string;
 }
 
-function getNotificationMessage(ticket: Ticket, type: string): string {
-  switch (type) {
-    case 'created':
-      return `Ваша заявка #${ticket.id} "${ticket.subject}" создана и принята в обработку.`;
-    case 'updated':
-      return `Статус заявки #${ticket.id} "${ticket.subject}" изменен на "${ticket.status}".`;
-    case 'closed':
-      return `Заявка #${ticket.id} "${ticket.subject}" закрыта.`;
-    case 'comment':
-      return `Новый комментарий в заявке #${ticket.id} "${ticket.subject}".`;
-    default:
-      return `Обновление по заявке #${ticket.id}`;
+/**
+ * Получить уведомления пользователя
+ */
+export async function getNotifications(userId: string, unreadOnly: boolean = false): Promise<Notification[]> {
+  try {
+    const params = new URLSearchParams({ user_id: userId });
+    if (unreadOnly) {
+      params.append('unread_only', 'true');
+    }
+    return await apiRequest<Notification[]>(`/notifications?${params.toString()}`);
+  } catch (error) {
+    console.error('Error fetching notifications:', error);
+    return [];
   }
 }
 
-export function getUnreadNotificationsCount(): number {
-  const notifications = JSON.parse(localStorage.getItem('email_notifications') || '[]');
-  return notifications.filter((n: any) => !n.read).length;
+/**
+ * Получить количество непрочитанных уведомлений
+ */
+export async function getUnreadCount(userId: string): Promise<number> {
+  try {
+    const params = new URLSearchParams({ user_id: userId });
+    const response = await apiRequest<{ count: number }>(`/notifications/unread/count?${params.toString()}`);
+    return response.count;
+  } catch (error) {
+    console.error('Error fetching unread count:', error);
+    return 0;
+  }
 }
 
-export function markNotificationAsRead(id: number) {
-  const notifications = JSON.parse(localStorage.getItem('email_notifications') || '[]');
-  const updated = notifications.map((n: any) => 
-    n.id === id ? { ...n, read: true } : n
-  );
-  localStorage.setItem('email_notifications', JSON.stringify(updated));
+/**
+ * Пометить уведомление как прочитанное
+ */
+export async function markAsRead(notificationId: string, userId: string): Promise<void> {
+  try {
+    const params = new URLSearchParams({ user_id: userId });
+    await apiRequest(`/notifications/${notificationId}/read?${params.toString()}`, {
+      method: 'PUT'
+    });
+  } catch (error) {
+    console.error('Error marking notification as read:', error);
+    throw error;
+  }
 }
 
-export function getAllNotifications() {
-  return JSON.parse(localStorage.getItem('email_notifications') || '[]');
+/**
+ * Пометить все уведомления как прочитанные
+ */
+export async function markAllAsRead(userId: string): Promise<void> {
+  try {
+    const params = new URLSearchParams({ user_id: userId });
+    await apiRequest(`/notifications/read-all?${params.toString()}`, {
+      method: 'PUT'
+    });
+  } catch (error) {
+    console.error('Error marking all as read:', error);
+    throw error;
+  }
 }
-
